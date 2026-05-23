@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  # Disable incremental compilation — not useful in CI and bloats the cache.
+  CARGO_INCREMENTAL: 0
+  # Faster linker for CI (improves link times on Linux).
+  RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
+
+jobs:
+  # ------------- Format -------------
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          # rust-toolchain.toml pins the version; this reads it automatically.
+          toolchain: "1.95.0"
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --check --all
+
+  # ------------- Lint -------------
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.95.0"
+          components: clippy
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  # ------------- Test -------------
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.95.0"
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run tests
+        run: cargo test --workspace
+
+  # ------------- Docs -------------
+  docs:
+    name: Docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.95.0"
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build documentation
+        # RUSTDOCFLAGS: -D warnings promotes rustdoc warnings to errors.
+        # --no-deps skips dependency docs — only check our own crates.
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps

@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+#
+# pre-commit hook: runs cargo fmt --check and validates TODO format
+# on staged Rust files.
+#
+# Installed via: git config core.hooksPath .githooks
+# Run manually:  .githooks/pre-commit
+
+set -euo pipefail
+
+# ------------- Formatting check -------------
+
+# Only run if there are staged .rs files.
+STAGED_RS=$(git diff --cached --name-only --diff-filter=ACM | grep '\.rs$' || true)
+
+if [ -n "$STAGED_RS" ]; then
+    if ! cargo fmt --check --quiet 2>/dev/null; then
+        echo ""
+        echo "  ✗ Formatting check failed. Run 'cargo fmt' and re-stage."
+        echo ""
+        exit 1
+    fi
+fi
+
+# ------------- TODO hygiene check -------------
+#
+# Every TODO comment must follow the format: // TODO(name): description
+# Bare // TODO or // TODO: without a name are rejected.
+#
+# Valid:   // TODO(kristoffer): fix the CFL bound once we have real data
+# Invalid: // TODO: fix this
+# Invalid: // TODO
+
+if [ -n "$STAGED_RS" ]; then
+    # Get the content of staged files (not the working tree version).
+    BAD_TODOS=""
+    while IFS= read -r file; do
+        # Use git show to check the staged version of the file.
+        BAD=$(git show ":$file" 2>/dev/null \
+            | grep -n '//\s*TODO' \
+            | grep -v '//\s*TODO([^)]\+):' \
+            || true)
+        if [ -n "$BAD" ]; then
+            BAD_TODOS="${BAD_TODOS}  $file:\n$BAD\n"
+        fi
+    done <<< "$STAGED_RS"
+
+    if [ -n "$BAD_TODOS" ]; then
+        echo ""
+        echo "  ✗ Malformed TODO comment(s) found in staged files."
+        echo "  All TODOs must follow the format: // TODO(name): description"
+        echo ""
+        echo -e "$BAD_TODOS"
+        echo "  See STYLE_GUIDE.md §11.4 for the TODO convention."
+        echo ""
+        exit 1
+    fi
+fi
+
+exit 0

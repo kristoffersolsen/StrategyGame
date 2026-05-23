@@ -1,6 +1,10 @@
 [package]
-name = "StrategyGame"
+name = "hex_strategy"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
+bevy = { version = "0.15", features = ["dynamic_linking"] }
+
+# dev builds only — dynamic_linking speeds up incremental compiles
+# remove for release
