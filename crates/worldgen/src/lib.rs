@@ -18,7 +18,7 @@
 //! tuning impossible.
 //!
 //! The full RNG-threading strategy is documented in
-//! `docs/adr/0001-determinism-and-rng-threading.md`.
+//! `docs/adr/0001-infra-determinism-and-rng-threading.md`.
 //!
 //! Hard rules enforced by lints and review:
 //! - No `rand::thread_rng` / `rand::rng` anywhere in the workspace.
