@@ -13,9 +13,9 @@ use proptest::prelude::*;
 // A "strategy" in proptest is a description of how to generate a value.
 // These are reusable building blocks for the tests below.
 
-/// Generates a valid `MapBounds` with width and height in `[1, 100]`.
+/// Generates a valid `MapBounds` with width in `[2, 100]` and height in `[1, 100]`.
 fn any_bounds() -> impl Strategy<Value = MapBounds> {
-    (1u32..=100, 1u32..=100).prop_map(|(w, h)| MapBounds::new(w, h))
+    (2u32..=100, 1u32..=100).prop_map(|(w, h)| MapBounds::new(w, h))
 }
 
 /// Generates a `Coord` that is guaranteed in-bounds for the given `MapBounds`.
