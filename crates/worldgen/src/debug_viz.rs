@@ -197,9 +197,10 @@ pub fn dump_field_hex<T: Copy>(
     let (img_width, img_height) = hex_image_dimensions(bounds.width(), bounds.height(), hex_size);
     let mut img = RgbImage::new(img_width, img_height);
 
-    // Fill background black so gaps between hexes are visible.
+    // Fill background with the border color so the gaps between
+    // hex tiles render as grid lines rather than black voids.
     for px in img.pixels_mut() {
-        *px = image::Rgb([0u8, 0, 0]);
+        *px = image::Rgb(HEX_BORDER_COLOR);
     }
 
     for (coord, &value) in field.iter_coords() {
@@ -239,30 +240,64 @@ pub fn hex_image_dimensions(map_width: u32, map_height: u32, hex_size: u32) -> (
 const SQRT3: f64 = 1.732_050_808_569_442;
 
 /// Returns the pixel-space centre of the hex at `coord`.
+///
+/// Converts axial `(q, r)` to pixel coordinates using an **odd-q
+/// offset layout**: every odd-indexed column is shifted down by half
+/// a hex height. This produces the staggered rectangular display
+/// familiar from Civilization-style hex maps, where the map as a
+/// whole is rectangular but adjacent columns interlock.
+///
+/// The conversion treats `q` as the on-screen column and `r` as the
+/// axial row within that column. The odd-column vertical shift is
+/// applied explicitly via the `q & 1` term.
+///
+/// We add padding of `size` on each axis so the topmost/leftmost
+/// tile is not clipped by the image boundary.
 fn hex_center(coord: Coord, hex_size: u32) -> (f64, f64) {
     let size = f64::from(hex_size);
     let col = f64::from(coord.q);
     let row = f64::from(coord.r);
-    // Flat-top axial to pixel:
-    //   x = size * (3/2 * q)
-    //   y = size * (√3/2 * q + √3 * r)
-    // We add a padding of `size` so the leftmost/topmost tile is not
-    // clipped by the image boundary.
+    // Horizontal spacing: 3/2 * size per column. The 0.5 column of
+    // padding leaves room for the leftmost tile's leftmost pixel.
     let cx = size * (1.5 * col + 1.0);
-    let cy = size * (SQRT3 * 0.5 * col + SQRT3 * row + SQRT3 * 0.5);
+    // Vertical spacing: √3 * size per row, plus √3/2 * size when in
+    // an odd column. The 0.5 row of padding leaves room for the
+    // topmost odd-column tile's top edge to sit below the image edge.
+    let odd_col_shift = if (coord.q & 1) == 0 { 0.0 } else { 0.5 };
+    let cy = size * SQRT3 * (row + odd_col_shift + 0.5);
     (cx, cy)
 }
+
+/// Background color painted behind all hex tiles.
+///
+/// Visible as the border between adjacent tiles. Dark grey reads as
+/// clean grid lines against all colormap palettes.
+const HEX_BORDER_COLOR: [u8; 3] = [40, 40, 40];
+
+/// Width of the border between adjacent tiles, in pixels.
+///
+/// Each hex is filled with radius `circumradius - HEX_BORDER_WIDTH`,
+/// leaving a gap of this many pixels around each tile edge. Set to
+/// `0.0` to produce a borderless fill (faster but loses grid lines
+/// and introduces boundary artifacts from floating-point edge cases).
+const HEX_BORDER_WIDTH: f64 = 1.0;
 
 /// Rasterizes a single flat-top hexagon centred at `coord` into `img`.
 ///
 /// Uses a bounding-box scan with a point-in-hexagon test. The
 /// circumradius is `hex_size` pixels; the inradius (centre to edge
-/// midpoint) is `hex_size * √3/2`.
+/// midpoint) is `hex_size * √3/2`. The filled area is inset by
+/// [`HEX_BORDER_WIDTH`] pixels so adjacent tiles leave a visible gap
+/// that renders as grid lines against the background color.
 fn rasterize_hex(img: &mut RgbImage, coord: Coord, hex_size: u32, rgb: [u8; 3]) {
     let size = f64::from(hex_size);
+    // Inset the fill radius so tiles don't touch. This simultaneously
+    // produces visible borders and eliminates boundary artifacts caused
+    // by floating-point ambiguity at the exact edge between two tiles.
+    let fill_size = size - HEX_BORDER_WIDTH;
     let (cx, cy) = hex_center(coord, hex_size);
 
-    // Bounding box: circumscribed rectangle of the hexagon.
+    // Bounding box: circumscribed rectangle of the full (unclipped) hex.
     // floor()/ceil() make the f64→i64 truncation exact (no fractional
     // part remains). .max(0) and .min(img_dim-1) guarantee the i64→u32
     // narrowing is lossless.
@@ -293,7 +328,7 @@ fn rasterize_hex(img: &mut RgbImage, coord: Coord, hex_size: u32, rgb: [u8; 3]) 
 
     for py in y_min..=y_max {
         for px in x_min..=x_max {
-            if point_in_flat_top_hex(f64::from(px), f64::from(py), cx, cy, size) {
+            if point_in_flat_top_hex(f64::from(px), f64::from(py), cx, cy, fill_size) {
                 img.put_pixel(px, py, image::Rgb(rgb));
             }
         }
@@ -412,6 +447,69 @@ const CATEGORICAL_PALETTE: [[u8; 3]; 12] = [
     [204, 235, 197],
     [255, 237, 111],
 ];
+
+// ------------- Seed overlay -------------
+
+/// Writes a pixel-per-tile PNG of `base_field` with `seeds` painted
+/// over it as single-pixel markers in `marker_color`.
+///
+/// The output is identical to [`dump_field_pixels`] except that the
+/// tiles at each seed coordinate are overwritten with `marker_color`,
+/// making seed positions visible against the base field.
+///
+/// Useful for step-1 verification: render a blank or gradient base
+/// field, overlay the Poisson-disk seeds, and confirm that they are
+/// evenly spaced without obvious clumping or seam artifacts.
+///
+/// `to_f32` must return values in `[0.0, 1.0]`; values outside that
+/// range are clamped by the colormap.
+///
+/// # Errors
+///
+/// Returns [`VisError::Io`] if the PNG cannot be written to `path`.
+pub fn dump_field_with_seed_overlay<T, F, C>(
+    field: &Field<T>,
+    seeds: &[coords::Coord],
+    path: &Path,
+    to_f32: F,
+    colormap: &C,
+    marker_color: [u8; 3],
+) -> Result<(), VisError>
+where
+    F: Fn(&T) -> f32,
+    C: Colormap,
+{
+    let bounds = field.bounds();
+    let width = bounds.width();
+    let height = bounds.height();
+
+    let mut img = RgbImage::new(width, height);
+
+    // Render base field.
+    for (coord, value) in field.iter_coords() {
+        let pixel = colormap.color(to_f32(value));
+        // Coords are in-bounds by construction; the cast is safe.
+        #[allow(clippy::cast_sign_loss)]
+        img.put_pixel(coord.q as u32, coord.r as u32, image::Rgb(pixel));
+    }
+
+    // Paint seed markers on top.
+    for &seed in seeds {
+        if let Some(normalized) = bounds.normalize(seed) {
+            #[allow(clippy::cast_sign_loss)]
+            img.put_pixel(
+                normalized.q as u32,
+                normalized.r as u32,
+                image::Rgb(marker_color),
+            );
+        }
+    }
+
+    img.save(path).map_err(|source| VisError::Io {
+        path: path.to_owned(),
+        source,
+    })
+}
 
 #[cfg(test)]
 mod tests {

@@ -13,14 +13,30 @@
 //!
 //! # Output
 //!
-//! All PNGs are written to `<output>/`. Each stage of the generation
-//! pipeline will add its own files here as the stages are implemented.
-//! Currently (Stage 2 stub) only the synthetic gradient files are written:
+//! All PNGs are written to `<output>/`. Files are prefixed by stage
+//! number so they sort in pipeline order.
 //!
-//! - `00_stub_gradient_hex.png` — hex-rasterized viridis gradient, for
-//!   visual confirmation that the rendering pipeline is working.
-//! - `00_stub_gradient_px.png` — one-pixel-per-tile version of the same,
-//!   for use in determinism tests.
+//! ## Stage 0 (infrastructure validation)
+//!
+//! - `00_stub_gradient_hex.png` — hex-rasterized viridis gradient,
+//!   confirming that the hex rendering pipeline is working.
+//! - `00_stub_gradient_px.png` — one-pixel-per-tile version of the
+//!   same, used by determinism tests.
+//!
+//! ## Stage 3.1 — Tectonics step 1: plate seed placement
+//!
+//! - `31_01_plate_seeds_px.png` — one-pixel-per-tile blank field with
+//!   Poisson-disk plate seeds painted as white markers on a black
+//!   background. Used to verify: seed count near target, even
+//!   distribution, no wrap-seam clustering.
+//!
+//! ## Stage 3.1 — Tectonics steps 2–3: plate map
+//!
+//! - `31_03_plate_map_px.png` — one-pixel-per-tile plate-ID field,
+//!   each plate a distinct categorical color. Used to verify: full
+//!   coverage, organic boundaries, no wrap-seam artifact.
+//! - `31_03_plate_map_hex.png` — hex-rasterized version of the same.
+//!   Primary visual for tuning `boundary_perturbation_amplitude`.
 
 use std::path::PathBuf;
 
@@ -29,13 +45,14 @@ use clap::{Parser, ValueEnum};
 use tracing::info;
 use worldgen::{
     BasicParams, Field, MapSize, WorldParams,
-    debug_viz::{Viridis, dump_field_hex, dump_field_pixels},
+    debug_viz::{
+        Categorical, Grayscale, Viridis, dump_field_hex, dump_field_pixels,
+        dump_field_with_seed_overlay,
+    },
     generate_world,
 };
 
 fn main() -> Result<()> {
-    // Initialise tracing to stderr so it doesn't interfere with stdout
-    // if a caller pipes mapdump output.
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter(
@@ -48,7 +65,6 @@ fn main() -> Result<()> {
 
     info!(seed = args.seed, output = %args.output.display(), "starting mapdump");
 
-    // Create output directory, including any missing parent directories.
     std::fs::create_dir_all(&args.output).with_context(|| {
         format!(
             "failed to create output directory: {}",
@@ -56,7 +72,6 @@ fn main() -> Result<()> {
         )
     })?;
 
-    // Build WorldParams from CLI arguments.
     let params = WorldParams {
         seed: args.seed,
         basic: BasicParams {
@@ -66,8 +81,6 @@ fn main() -> Result<()> {
         ..WorldParams::default()
     };
 
-    // Run the generation pipeline. Currently a stub that returns only
-    // MapBounds; real stage output is added in Stage 3.
     info!("running generate_world");
     let world = generate_world(&params).context("world generation failed")?;
     let bounds = world.bounds;
@@ -77,29 +90,72 @@ fn main() -> Result<()> {
         "bounds ready"
     );
 
-    // Construct a synthetic gradient field for visual validation of the
-    // rendering pipeline. Each tile's value is its normalised row index
-    // (0.0 at the north pole, 1.0 at the south pole), giving a smooth
-    // viridis gradient from purple to yellow across the map.
-    //
-    // The casts below are safe: map heights are at most 250 (Huge variant),
-    // well within f32's 24-bit mantissa precision.
+    // ------------- Stage 0: infrastructure stub -------------
+
+    // Synthetic gradient for render-pipeline validation.
     #[allow(clippy::cast_precision_loss)]
     let gradient = Field::from_fn(bounds, |coord| {
         coord.r as f32 / (bounds.height() - 1) as f32
     });
 
-    // Write hex-rasterized output for human inspection.
     let hex_path = args.output.join("00_stub_gradient_hex.png");
     info!(path = %hex_path.display(), hex_size = args.hex_size, "writing hex PNG");
     dump_field_hex(&gradient, &hex_path, |v| v, &Viridis, args.hex_size)
         .with_context(|| format!("failed to write {}", hex_path.display()))?;
 
-    // Write pixel-per-tile output for determinism test hashing.
     let px_path = args.output.join("00_stub_gradient_px.png");
     info!(path = %px_path.display(), "writing pixel PNG");
     dump_field_pixels(&gradient, &px_path, |v| v, &Viridis)
         .with_context(|| format!("failed to write {}", px_path.display()))?;
+
+    // ------------- Stage 3.1, step 1: plate seeds -------------
+
+    let seed_count = world.tectonics.seeds.len();
+    info!(
+        seed_count,
+        target = params.tuning.tectonics.target_plate_count,
+        "plate seeds placed"
+    );
+
+    // Black base field; seeds painted white so they stand out clearly.
+    let black = Field::filled(bounds, 0.0_f32);
+    let seeds_path = args.output.join("31_01_plate_seeds_px.png");
+    info!(path = %seeds_path.display(), "writing plate seeds PNG");
+    dump_field_with_seed_overlay(
+        &black,
+        &world.tectonics.seeds,
+        &seeds_path,
+        |v| *v,
+        &Grayscale,
+        [255, 255, 255], // white markers
+    )
+    .with_context(|| format!("failed to write {}", seeds_path.display()))?;
+
+    // ------------- Stage 3.1, steps 2–3: plate map -------------
+
+    let plate_count = world.tectonics.seeds.len();
+    info!(plate_count, "noise-perturbed Voronoi partition complete");
+
+    let plates_px_path = args.output.join("31_03_plate_map_px.png");
+    info!(path = %plates_px_path.display(), "writing plate map pixel PNG");
+    dump_field_pixels(
+        &world.tectonics.plate_id,
+        &plates_px_path,
+        f32::from,
+        &Categorical,
+    )
+    .with_context(|| format!("failed to write {}", plates_px_path.display()))?;
+
+    let plates_hex_path = args.output.join("31_03_plate_map_hex.png");
+    info!(path = %plates_hex_path.display(), hex_size = args.hex_size, "writing plate map hex PNG");
+    dump_field_hex(
+        &world.tectonics.plate_id,
+        &plates_hex_path,
+        f32::from,
+        &Categorical,
+        args.hex_size,
+    )
+    .with_context(|| format!("failed to write {}", plates_hex_path.display()))?;
 
     info!("done");
     Ok(())

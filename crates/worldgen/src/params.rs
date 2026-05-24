@@ -7,8 +7,10 @@
 //!   produces a playable map.
 //! - [`AdvancedParams`] — strategic environment (size, climate band,
 //!   resource abundance, ...). Hard-capped at 6–8 sliders.
-//! - [`TuningParams`] — every internal generation knob. Extreme values
-//!   may produce broken maps; intended for experimentation.
+//! - [`TuningParams`] — every internal generation knob, grouped by
+//!   pipeline stage. Extreme values may produce broken maps; intended
+//!   for experimentation. Stage-specific parameter structs live in
+//!   the [`tectonics`] (etc.) submodules.
 //!
 //! The split is a contract with the future UI: each layer maps to a
 //! distinct menu, and the achievement gate fires on whether any
@@ -18,14 +20,20 @@
 //! that an unconfigured [`WorldParams`] produces a sensible, playable
 //! medium-sized continents map.
 
+mod tectonics;
+pub use tectonics::{
+    MAX_BOUNDARY_PERTURBATION_AMPLITUDE, MAX_LAND_LEVEL_COUNT, MAX_TARGET_PLATE_COUNT,
+    MIN_LAND_LEVEL_COUNT, MIN_TARGET_PLATE_COUNT, TectonicsParams,
+};
+
 use crate::error::GenerationError;
 
 /// The complete set of generation parameters and the master seed.
 ///
-///
 /// `WorldParams` is `PartialEq` but not `Eq` because [`AdvancedParams`]
-/// holds an `f32` (`land_fraction`). Determinism does not require `Eq`
-/// — generation hashes the bit pattern via the determinism scaffold
+/// holds an `f32` (`land_fraction`) and [`TuningParams::tectonics`]
+/// holds `Vec<f32>` proportions. Determinism does not require `Eq` —
+/// generation hashes the bit pattern via the determinism scaffold
 /// (see Stage 2.4).
 #[derive(Debug, Clone, PartialEq)]
 pub struct WorldParams {
@@ -42,15 +50,16 @@ pub struct WorldParams {
 impl WorldParams {
     /// Returns parameters describing a default medium continents map.
     ///
-    /// Equivalent to [`Self::default`] but `const`, so it can be used
-    /// in contexts that require compile-time evaluation.
+    /// Cannot be `const`: [`TuningParams::tectonics`] owns heap data
+    /// (the level-proportions vector), and `const` initialisers must
+    /// not allocate.
     #[must_use]
-    pub const fn const_default() -> Self {
+    pub fn defaults() -> Self {
         Self {
             seed: 0,
             basic: BasicParams::const_default(),
             advanced: AdvancedParams::const_default(),
-            tuning: TuningParams::const_default(),
+            tuning: TuningParams::defaults(),
         }
     }
 
@@ -74,13 +83,14 @@ impl WorldParams {
                 reason: "player_count must be at least 1".to_owned(),
             });
         }
+        self.tuning.validate()?;
         Ok(())
     }
 }
 
 impl Default for WorldParams {
     fn default() -> Self {
-        Self::const_default()
+        Self::defaults()
     }
 }
 
@@ -268,35 +278,56 @@ pub enum ResourceAbundance {
 
 /// Full-tunability layer parameters.
 ///
-/// Every internal generation knob lives here. Fields are added by each
-/// pipeline stage as it lands; Stage 2 ships this type as an empty
-/// struct so the layer split is in place from the start.
+/// Every internal generation knob lives here, grouped by pipeline
+/// stage. New stages add their own sub-struct as a field; each
+/// sub-struct's fields are independently `pub` and rustdoc'd.
 ///
 /// Per design doc §1.15, setting any field to a non-default value
 /// disables achievements for the resulting game.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct TuningParams {
-    // No fields yet. Tectonics will add plate-count, plate-jitter,
-    // mountain-falloff, etc. Climate will add advection-iterations,
-    // wind-speed, orographic-factor, evaporation-rate. And so on.
+    /// Knobs consumed by the tectonics stage (design §1.9).
+    pub tectonics: TectonicsParams,
+    // Climate, hydrology, biomes, resources, and starting-position
+    // sub-structs are added when their stages land.
 }
 
 impl TuningParams {
-    /// `const` form of [`Self::default`].
+    /// Returns the default tuning parameters.
+    ///
+    /// Cannot be `const`: the nested per-stage param structs own heap
+    /// data and a `const fn` constructor cannot allocate.
     #[must_use]
-    pub const fn const_default() -> Self {
-        Self {}
+    pub fn defaults() -> Self {
+        Self {
+            tectonics: TectonicsParams::defaults(),
+        }
     }
 
-    /// Returns `true` if every field equals its default.
+    /// Validates every nested per-stage parameter struct.
     ///
-    /// Used by the achievement gate: only when this returns `true` for
-    /// the [`TuningParams`] of an active game are achievements
-    /// awarded.
+    /// # Errors
+    ///
+    /// Returns the first error reported by any sub-struct's own
+    /// `validate` method.
+    pub fn validate(&self) -> Result<(), GenerationError> {
+        self.tectonics.validate()?;
+        Ok(())
+    }
+
+    /// Returns `true` if every nested sub-struct equals its default.
+    ///
+    /// Used by the achievement gate.
     #[must_use]
     pub fn is_all_default(&self) -> bool {
-        *self == Self::default()
+        self.tectonics.is_all_default()
+    }
+}
+
+impl Default for TuningParams {
+    fn default() -> Self {
+        Self::defaults()
     }
 }
 
@@ -345,8 +376,18 @@ mod tests {
     }
 
     #[test]
+    fn invalid_tectonics_propagates_through_world_validate() {
+        let mut params = WorldParams::default();
+        params.tuning.tectonics.target_plate_count = 0;
+        assert!(matches!(
+            params.validate(),
+            Err(GenerationError::InvalidParams { .. })
+        ));
+    }
+
+    #[test]
     fn fresh_tuning_params_are_all_default() {
-        assert!(TuningParams::default().is_all_default());
+        assert!(TuningParams::defaults().is_all_default());
     }
 
     #[test]

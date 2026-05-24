@@ -18,9 +18,7 @@
 //! tuning impossible.
 //!
 //! The full RNG-threading strategy is documented in
-//! `docs/adr/0009-determinism-and-rng-threading.md`. It will be
-//! implemented in a follow-up commit; this module currently exposes
-//! only the data-shape API contract that every stage will use.
+//! `docs/adr/0001-determinism-and-rng-threading.md`.
 //!
 //! Hard rules enforced by lints and review:
 //! - No `rand::thread_rng` / `rand::rng` anywhere in the workspace.
@@ -54,18 +52,20 @@ mod error;
 mod field;
 mod params;
 pub mod rng;
+mod stages;
 mod world_data;
 
 pub use error::GenerationError;
 pub use field::Field;
 pub use params::{
-    AdvancedParams, BasicParams, ClimateBand, MapArchetype, MapSize, ResourceAbundance,
-    TuningParams, WorldAge, WorldParams,
+    AdvancedParams, BasicParams, ClimateBand, MAX_BOUNDARY_PERTURBATION_AMPLITUDE,
+    MAX_LAND_LEVEL_COUNT, MAX_TARGET_PLATE_COUNT, MIN_LAND_LEVEL_COUNT, MIN_TARGET_PLATE_COUNT,
+    MapArchetype, MapSize, ResourceAbundance, TectonicsParams, TuningParams, WorldAge, WorldParams,
 };
-pub use world_data::WorldData;
+pub use world_data::{PlateId, TectonicData, WorldData};
 
 use coords::MapBounds;
-use rng::MasterRng;
+use rng::{MasterRng, StageId};
 
 /// Runs the full world-generation pipeline against `params` and returns
 /// the finalized [`WorldData`].
@@ -76,10 +76,11 @@ use rng::MasterRng;
 ///
 /// # Errors
 ///
-/// Returns [`GenerationError`] if any pipeline stage fails. The current
-/// failure modes are:
+/// Returns [`GenerationError`] if any pipeline stage fails. Current
+/// failure modes:
 /// - [`GenerationError::InvalidParams`] — the supplied [`WorldParams`]
-///   are internally inconsistent (e.g. zero map dimensions).
+///   are internally inconsistent (e.g. zero map dimensions, or a
+///   `TectonicsParams` field outside its valid range).
 ///
 /// Additional failure modes will be added as later stages are
 /// implemented; see the variants on [`GenerationError`].
@@ -90,19 +91,17 @@ use rng::MasterRng;
 /// The same `params` value always produces byte-identical output,
 /// across machines and across rebuilds.
 pub fn generate_world(params: &WorldParams) -> Result<WorldData, GenerationError> {
-    // Stage 2 stub: validate params, construct empty WorldData.
-    // Real pipeline stages are filled in during Stage 3.1–3.6.
     params.validate()?;
 
     let (width, height) = params.basic.map_size.dimensions();
-    // Safe: MapSize::dimensions() returns non-zero values for every
-    // variant; validate() above is defence-in-depth for Custom variants.
     let bounds = MapBounds::new(width, height);
+    let master = MasterRng::new(params.seed);
 
-    // Construct the master RNG. Each stage will receive a sub-RNG via
-    // master.fork(StageId::X). Not used until Stage 3.1, but
-    // constructed here so the pattern is in place.
-    let _master = MasterRng::new(params.seed);
+    let mut world = WorldData::new(bounds);
 
-    Ok(WorldData::new(bounds))
+    // Stage 3.1: tectonics.
+    let mut tectonic_rng = master.fork(StageId::Tectonics);
+    world.tectonics = stages::tectonics::run(bounds, &params.tuning.tectonics, &mut tectonic_rng)?;
+
+    Ok(world)
 }
