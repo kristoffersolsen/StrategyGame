@@ -33,6 +33,8 @@ rand_core = "0.10.0"
 serde    = { version = "1", features = ["derive"] }
 ron      = "0.12.1"
 proptest = "1"
+clap = { version = "4", features = ["derive"] }
+
 
 [workspace.lints.rust]
 unsafe_code     = "forbid"

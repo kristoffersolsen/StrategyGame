@@ -16,3 +16,5 @@ rand_chacha = { workspace = true }
 serde       = { workspace = true }
 ron         = { workspace = true }
 rand_core = { workspace = true }
+image = "0.25.10"
+tempfile = "3.27.0"

@@ -49,6 +49,7 @@
 //! sub-structure to [`WorldData`]. See `docs/design/overview.md`
 //! §1.9–1.14 for the algorithm design.
 
+pub mod debug_viz;
 mod error;
 mod field;
 mod params;
