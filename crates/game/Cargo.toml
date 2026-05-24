@@ -1,0 +1,15 @@
+[package]
+name    = "game"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+coords   = { workspace = true }
+worldgen = { workspace = true }
+bevy     = { workspace = true }
+anyhow   = { workspace = true }
+tracing  = { workspace = true }
+tracing-subscriber = { workspace = true }
