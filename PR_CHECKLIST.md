@@ -8,12 +8,6 @@ The companion file `.github/pull_request_template.md` auto-populates on
 every PR with a shortened version of this checklist. Use that as the
 operational checklist; this document explains *why* each item matters.
 
-> **TODO (Kristoffer):** Once the development environment is settled,
-> add automation that catches what the checklist currently relies on
-> humans for — commit message linting (commitlint or equivalent), TODO
-> comment hygiene check, link-resolution check for cross-references.
-> Items moved to automation can be removed from this checklist.
-
 ---
 
 ## What CI already enforces
@@ -123,26 +117,6 @@ when the structure changes:
 **Not this case:** a new function was added, a system was refactored
 internally, a new test was written. These don't change structure.
 
-### 7. Commit message follows Conventional Commits
-
-The format is enforced by convention, not (yet) by automation. Self-check:
-
-- **Type** matches the change: `feat` for new features, `fix` for bug
-  fixes, `refactor` for structural changes without behavior change,
-  `docs` for doc-only PRs, etc. (See documentation guide §6.2 for full
-  list.)
-- **Scope** matches what was actually touched. If your commit touches
-  multiple crates and the scopes don't fit cleanly, the PR probably
-  should have been split.
-- **Subject** is imperative mood ("add", not "added"), lowercase, no
-  trailing period, ≤72 chars.
-- **Body** is present when the *why* isn't obvious from the diff. The
-  diff tells you what changed; the body tells you why.
-- **Breaking changes** marked with `!` after type/scope and/or
-  `BREAKING CHANGE:` footer.
-
-For PRs that contain multiple commits, the merge commit (or squash
-commit) follows the same rules.
 
 ### 8. Cross-references resolve to real files
 
@@ -172,27 +146,3 @@ CI may catch things you missed (a new lint failure, a doctest that
 doesn't compile, a test that fails on a clean checkout). Fix those
 before requesting review (even from yourself).
 
-### Sole-developer reality
-
-You are the reviewer. The checklist is for you-now to leave instructions
-for you-in-two-hours when you've forgotten what you were doing. The
-discipline is the same as for a multi-contributor team; the difference
-is you're checking your own work.
-
-If a check fails: fix it, don't waive it. "I'll come back to this" is
-how documentation rot starts.
-
----
-
-## When this checklist is wrong
-
-The checklist is wrong when:
-- An item is on it that automation now catches (move to CI, remove from
-  checklist).
-- An item is missing that has bitten you more than once (add it, with a
-  short rationale).
-- An item is consistently ticked without thought (it's either too
-  obvious to keep or too vague to be useful — fix or remove).
-
-Update this file when the checklist needs to change. Don't silently
-ignore items.
