@@ -565,7 +565,6 @@ If the plan and reality drift, the plan is wrong. Fix it.
 
 ## Status
 
-**Current stage:** Stage 0 not yet started.
+**Current stage:** Stage 1 complete.
 
-**Next action:** Decide the git hook framework (sub-decision in §0.5),
-then begin Stage 0.1 (workspace skeleton) as the first PR.
+**Next action:** Begin stage 2.
