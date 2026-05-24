@@ -12,7 +12,7 @@
 //! See `docs/design/overview.md` §1.4 for the coordinate system rationale.
 
 mod bounds;
-mod coords;
+mod coord;
 
 pub use bounds::MapBounds;
-pub use coords::{Coord, Direction};
+pub use coord::{Coord, Direction};

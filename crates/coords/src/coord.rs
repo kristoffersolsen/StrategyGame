@@ -26,6 +26,14 @@ impl Coord {
     /// Performs no validation; the returned coordinate may be outside
     /// any particular map's bounds. Use [`crate::MapBounds`] operations to
     /// normalize or check.
+    /// /// # Examples
+    ///
+    /// ```
+    /// use coords::Coord;
+    /// let c = Coord::new(3, -7);
+    /// assert_eq!(c.q, 3);
+    /// assert_eq!(c.r, -7);
+    /// ```
     #[must_use]
     pub const fn new(q: i32, r: i32) -> Self {
         Self { q, r }
