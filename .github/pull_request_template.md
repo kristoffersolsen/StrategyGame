@@ -35,20 +35,4 @@ why each one matters.
 - [ ] **ARCHITECTURE.md updated** if workspace structure changed
 - [ ] **Cross-references resolve** to real files / sections / items
 
-### Commit message
 
-- [ ] **Type and scope** match the change (`feat(coords):`, `fix(worldgen):`, etc.)
-- [ ] **Subject** is imperative mood, lowercase, ≤72 chars, no trailing period
-- [ ] **Body** is present when the *why* isn't obvious from the diff
-- [ ] **Breaking changes** marked with `!` and/or `BREAKING CHANGE:` footer
-
----
-
-<!--
-Not in the list because CI handles it:
-  - cargo fmt --check
-  - cargo clippy -- -D warnings
-  - cargo test (incl. rustdoc examples)
-  - cargo doc
-  - missing_docs / missing_errors_doc / missing_panics_doc lints
--->
