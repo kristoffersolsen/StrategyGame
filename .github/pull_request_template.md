@@ -23,6 +23,7 @@ why each one matters.
 
 ### Documentation
 
+- [ ] ** Run and pass ./scripts/check.sh
 - [ ] **ADR(s) written** for any cross-cutting decisions made in this PR
       (see documentation guide §4.2)
 - [ ] **Design doc updated** if design intent changed

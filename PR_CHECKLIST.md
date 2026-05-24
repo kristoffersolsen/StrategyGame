@@ -27,6 +27,10 @@ fix is in CI, not here.
 
 ## The checklist
 
+### 1. All tests pass
+
+Run and pass ./scripts/check.sh. This is a replacement for github actions.
+
 ### 1. ADRs written for cross-cutting decisions
 
 If this PR makes a decision that meets the ADR criteria from the
