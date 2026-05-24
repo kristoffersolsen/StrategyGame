@@ -8,9 +8,17 @@ workspace = true
 
 [dependencies]
 coords      = { workspace = true }
+det-rng     = { workspace = true }
 thiserror   = { workspace = true }
 tracing     = { workspace = true }
 rand        = { workspace = true }
 rand_chacha = { workspace = true }
 serde       = { workspace = true }
 ron         = { workspace = true }
+rand_core   = { workspace = true }
+image       = { version = "0.25", default-features = false, features = ["png"] }
+
+[dev-dependencies]
+blake3   = { workspace = true }
+image    = { version = "0.25", default-features = false, features = ["png"] }
+tempfile = "3"

@@ -25,13 +25,12 @@ impl MapBounds {
     ///
     /// # Panics
     ///
-    /// Panics if `width` or `height` is `0`. A zero-dimension map has no
-    /// valid coordinates, so any such bounds value would make every
-    /// operation ill-defined. This is a programmer error, not a runtime
-    /// condition, so it panics rather than returning [`Option`].
+    /// Panics if `width < 2` or `height < 1`. Width must be at least 2 because
+    /// a cylindrical map of width 1 is degenerate: every tile's east and west
+    /// steps wrap back to the same tile, making it its own neighbor at distance 0.
     #[must_use]
     pub const fn new(width: u32, height: u32) -> Self {
-        assert!(width > 0, "map width must be non-zero");
+        assert!(width >= 2, "map width must be at least 2");
         assert!(height > 0, "map height must be non-zero");
         assert!(width <= i32::MAX as u32, "map width must fit in i32");
         assert!(height <= i32::MAX as u32, "map height must fit in i32");
@@ -241,9 +240,15 @@ mod tests {
         }
 
         #[test]
-        #[should_panic(expected = "map width must be non-zero")]
+        #[should_panic(expected = "map width must be at least 2")]
         fn new_panics_on_zero_width() {
             let _ = MapBounds::new(0, 10);
+        }
+
+        #[test]
+        #[should_panic(expected = "map width must be at least 2")]
+        fn new_panics_on_width_one() {
+            let _ = MapBounds::new(1, 10);
         }
 
         #[test]

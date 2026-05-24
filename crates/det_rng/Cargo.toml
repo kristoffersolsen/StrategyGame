@@ -1,0 +1,11 @@
+[package]
+name    = "det-rng"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+rand_chacha = { workspace = true } # 0.10.0
+rand_core   = { workspace = true } # 0.10.0

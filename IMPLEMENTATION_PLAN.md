@@ -565,6 +565,6 @@ If the plan and reality drift, the plan is wrong. Fix it.
 
 ## Status
 
-**Current stage:** Stage 1 complete.
+**Current stage:** Stage 2 complete.
 
-**Next action:** Begin stage 2.
+**Next action:** Begin stage 3.

@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/coords",
+    "crates/det_rng",
     "crates/worldgen",
     "crates/game",
     "tools/mapdump",
@@ -16,6 +17,7 @@ license = "TBD"
 [workspace.dependencies]
 # Workspace crates
 coords  = { path = "crates/coords" }
+det-rng = { path = "crates/det_rng" }
 worldgen = { path = "crates/worldgen" }
 
 # External dependencies — versions pinned here, referenced in member crates
@@ -27,9 +29,13 @@ tracing  = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rand     = "0.10.1"
 rand_chacha = "0.10.0"
+rand_core = "0.10.0"
 serde    = { version = "1", features = ["derive"] }
 ron      = "0.12.1"
 proptest = "1"
+clap = { version = "4", features = ["derive"] }
+blake3 = "1"
+
 
 [workspace.lints.rust]
 unsafe_code     = "forbid"
