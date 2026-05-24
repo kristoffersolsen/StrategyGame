@@ -52,6 +52,7 @@
 mod error;
 mod field;
 mod params;
+pub mod rng;
 mod world_data;
 
 pub use error::GenerationError;
@@ -63,6 +64,7 @@ pub use params::{
 pub use world_data::WorldData;
 
 use coords::MapBounds;
+use rng::MasterRng;
 
 /// Runs the full world-generation pipeline against `params` and returns
 /// the finalized [`WorldData`].
@@ -93,9 +95,13 @@ pub fn generate_world(params: &WorldParams) -> Result<WorldData, GenerationError
 
     let (width, height) = params.basic.map_size.dimensions();
     // Safe: MapSize::dimensions() returns non-zero values for every
-    // variant; validate() above is a defence-in-depth check that
-    // catches future variants or hand-constructed params.
+    // variant; validate() above is defence-in-depth for Custom variants.
     let bounds = MapBounds::new(width, height);
+
+    // Construct the master RNG. Each stage will receive a sub-RNG via
+    // master.fork(StageId::X). Not used until Stage 3.1, but
+    // constructed here so the pattern is in place.
+    let _master = MasterRng::new(params.seed);
 
     Ok(WorldData::new(bounds))
 }

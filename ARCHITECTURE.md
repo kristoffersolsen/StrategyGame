@@ -7,17 +7,18 @@ It is updated at each stage gate as new structure is added.
 For *why* the architecture is this way, see `docs/design/overview.md`.
 For *when* decisions were made, see `docs/adr/`.
 
-**Current stage:** Stage 1 complete.
+**Current stage:** Stage 2 in progress.
 
 ---
 
 ## Workspace layout
 crates/ \
 coords/     — wrap-aware hexagonal coordinate math (no dependencies) \
-worldgen/   — procedural world generation pipeline (depends on coords) \
-game/       — Bevy application and runtime (depends on coords, worldgen) \
+det_rng/    — deterministic RNG primitives (no project dependencies) \
+worldgen/   — procedural world generation pipeline (depends on coords, det_rng) \
+game/       — Bevy application and runtime (depends on coords, worldgen, det_rng) \
 tools/ \
-mapdump/    — CLI tool for dumping generation output to PNG (standalone) 
+mapdump/    — CLI tool for dumping generation output to PNG (standalone)
 
 ## Crate responsibilities
 
@@ -29,6 +30,20 @@ this crate.
 
 Public API entry points: [`Coord`], [`MapBounds`], [`Direction`].
 
+### `det_rng`
+
+Deterministic-RNG primitives shared across the project. Exposes
+`DetRng` (a newtype wrapper around `rand_chacha::ChaCha8Rng` with a
+documented stability guarantee), `derive_seed` (combines a master seed
+and a domain-specific salt into an independent sub-seed), and the
+underlying `splitmix64` mixer.
+
+The higher-level APIs that drive sub-RNG threading — `MasterRng`,
+`StageRng`, and `StageId` for generation; the future `GameRng` for
+runtime — live in their respective consumer crates because their
+needs (stage-keyed vs system-keyed, one-shot vs save/load-aware)
+diverge enough that a single API would serve neither well.
+
 ### `worldgen`
 
 The generation pipeline: tectonics, climate, hydrology, biomes,
@@ -36,8 +51,10 @@ resources, starting positions. Takes a seed and [`WorldParams`],
 produces [`WorldData`]. Runs standalone (used by `mapdump`) and is
 loaded by `game` at world creation time.
 
-Currently contains placeholder stubs for `WorldData` and `WorldParams`;
-full implementation begins in Stage 2.
+Currently contains the Stage 2 infrastructure (`WorldData`,
+`WorldParams`, `Field<T>`, `GenerationError`) and the RNG-threading
+module built on `det_rng`. The six generation stages themselves are
+implemented in Stage 3.
 
 ### `game`
 
@@ -56,13 +73,15 @@ launching the full game. Implementation begins in Stage 2.
 ---
 
 ## Dependency graph
-game  ──────────────────────────────► coords  
-│ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;  ▲  
-└──► worldgen ───────────────────────► coords  
-mapdump ──► worldgen ──► coords
+game     ──► coords \
+──► worldgen ──► coords \
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└──► det_rng \
+──► det_rng \
+mapdump  ──► worldgen ──► (above)
 
-No cycles. `coords` has zero dependencies. `worldgen` does not depend
-on `game`. `game` does not depend on `mapdump`.
+No cycles. `coords` and `det_rng` have zero project dependencies.
+`worldgen` does not depend on `game`. `game` does not depend on
+`mapdump`.
 
 ---
 
@@ -80,5 +99,9 @@ on `game`. `game` does not depend on `mapdump`.
 
 - **`worldgen` has no Bevy dependency** — generation runs headlessly.
   `mapdump` exists specifically to exploit this.
+
+- **`det_rng` exposes only the shared primitive** — stage-keyed and
+  system-keyed RNG APIs live in their respective consumers. See ADR
+  for the rationale.
 
 For the full decision history, see `docs/adr/`.

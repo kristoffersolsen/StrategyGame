@@ -562,6 +562,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "det-rng"
+version = "0.1.0"
+dependencies = [
+ "rand_chacha 0.10.0",
+ "rand_core 0.10.1",
+]
+
+[[package]]
 name = "disqualified"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -604,16 +612,6 @@ checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
  "windows-sys",
-]
-
-[[package]]
-name = "error"
-version = "0.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6e606f14042bb87cc02ef6a14db6c90ab92ed6f62d87e69377bc759fd7987cc"
-dependencies = [
- "traitobject",
- "typeable",
 ]
 
 [[package]]
@@ -1628,18 +1626,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "traitobject"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04a79e25382e2e852e8da874249358d382ebaf259d0d34e75d8db16a7efabbc7"
-
-[[package]]
-name = "typeable"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1410f6f91f21d1612654e7cc69193b0334f909dcf2c790c4826254fbb86f8887"
-
-[[package]]
 name = "typeid"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1959,9 +1945,10 @@ name = "worldgen"
 version = "0.1.0"
 dependencies = [
  "coords",
- "error",
+ "det-rng",
  "rand 0.10.1",
  "rand_chacha 0.10.0",
+ "rand_core 0.10.1",
  "ron",
  "serde",
  "thiserror 2.0.18",
