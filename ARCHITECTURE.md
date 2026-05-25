@@ -5,9 +5,9 @@ what the crates are, what they own, and how they depend on each other.
 It is updated at each stage gate as new structure is added.
 
 For *why* the architecture is this way, see `docs/design/overview.md`.
-For *when* decisions were made, see `docs/adr/`.
+For *when* decisions were made, see `documents/adr/`.
 
-**Current stage:** Stage 2 in progress.
+**Current stage:** Stage 3.1 complete. Stage 3.2 (climate) next.
 
 ---
 
@@ -18,7 +18,8 @@ det_rng/    — deterministic RNG primitives (no project dependencies) \
 worldgen/   — procedural world generation pipeline (depends on coords, det_rng) \
 game/       — Bevy application and runtime (depends on coords, worldgen, det_rng) \
 tools/ \
-mapdump/    — CLI tool for dumping generation output to PNG (standalone)
+mapdump/    — CLI: dump a single seed's generation output to PNG \
+maptest/    — CLI: multi-seed runs and parameter-range sweeps (rayon parallel)
 
 ## Crate responsibilities
 
@@ -48,13 +49,18 @@ diverge enough that a single API would serve neither well.
 
 The generation pipeline: tectonics, climate, hydrology, biomes,
 resources, starting positions. Takes a seed and [`WorldParams`],
-produces [`WorldData`]. Runs standalone (used by `mapdump`) and is
+produces [`WorldData`]. Runs standalone (used by both tools) and is
 loaded by `game` at world creation time.
 
-Currently contains the Stage 2 infrastructure (`WorldData`,
-`WorldParams`, `Field<T>`, `GenerationError`) and the RNG-threading
-module built on `det_rng`. The six generation stages themselves are
-implemented in Stage 3.
+Stage 3.1 (tectonics) is complete. Stage 3.2 and beyond are next.
+
+`TectonicsParams` (and all `WorldParams` tuning structs) derive
+`serde::Serialize` / `serde::Deserialize` so they can be loaded from
+RON preset files by `maptest` and `mapdump`.
+
+`worldgen::debug_viz` contains shared colormap types (`BoundaryCmap`,
+`HeightLevelCmap`, `Viridis`, `Categorical`, `Grayscale`) and
+rasterization helpers used by both tools.
 
 ### `game`
 
@@ -67,8 +73,24 @@ Currently a stub; implementation begins in Stage 4.
 ### `mapdump` (tool)
 
 A CLI binary for running the generation pipeline headlessly and dumping
-intermediate and final fields to PNG. Used for parameter tuning without
-launching the full game. Implementation begins in Stage 2.
+intermediate and final fields to PNG for a single (seed, params) pair.
+Accepts `--params <file.ron>` for parameter overrides; defaults to
+`TectonicsParams::defaults()` when omitted. Used for quick single-seed
+inspection; use `maptest` for multi-seed runs and parameter sweeps.
+
+### `maptest` (tool)
+
+A CLI binary for parameter tuning workflows that go beyond a single run:
+
+- **`run`** — generate debug images for a fixed parameter set across
+  multiple seeds (default: seeds 1–8) in sequence.
+- **`sweep`** — vary one `TectonicsParams` scalar field across an
+  evenly-spaced range of values, generating all (value, seed) pairs in
+  parallel via `rayon`.
+
+Both subcommands accept `--params <file.ron>` to load base parameters
+from a RON preset file. Preset files live in `tools/maptest/presets/`.
+See `tools/maptest/README.md` for full usage.
 
 ---
 
@@ -77,7 +99,8 @@ game     ──► coords \
 ──► worldgen ──► coords \
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└──► det_rng \
 ──► det_rng \
-mapdump  ──► worldgen ──► (above)
+mapdump  ──► worldgen ──► (above) \
+maptest  ──► worldgen ──► (above)
 
 No cycles. `coords` and `det_rng` have zero project dependencies.
 `worldgen` does not depend on `game`. `game` does not depend on
@@ -104,4 +127,12 @@ No cycles. `coords` and `det_rng` have zero project dependencies.
   system-keyed RNG APIs live in their respective consumers. See ADR
   for the rationale.
 
-For the full decision history, see `docs/adr/`.
+- **Parameter tuning via a dedicated `maptest` crate and RON preset
+  files** — rather than CLI flags for every parameter or shell scripts,
+  `TectonicsParams` is serializable/deserializable via `serde` + RON.
+  Preset files in `tools/maptest/presets/` capture named configurations.
+  `maptest sweep` runs parallel (value, seed) grids via `rayon`. This
+  pattern scales to future generation stages without any tool changes.
+  See ADR-0003 for the full rationale.
+
+For the full decision history, see `documents/adr/`.

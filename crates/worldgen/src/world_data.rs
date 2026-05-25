@@ -1,45 +1,265 @@
-//! Final output of the generation pipeline.
+//! Final output of the generation pipeline, and per-stage sub-structures.
+//!
+//! [`WorldData`] is the top-level type consumed by the `game` crate to
+//! spawn world entities. Each pipeline stage populates its own
+//! sub-structure; these live here alongside `WorldData` so that the
+//! data layout is visible in one place.
+//!
+//! Sub-structures are added in pipeline order as each stage lands.
 
-use coords::MapBounds;
+use coords::{Coord, MapBounds};
+
+use crate::Field;
+
+// ------------- Boundary classification -------------
+
+/// The interaction type at a boundary between two adjacent tectonic plates.
+///
+/// Determined by the component of the relative motion vector directed
+/// along the boundary normal (the unit vector from one plate's seed to
+/// the other's). Given plates A and B with seeds and motion vectors,
+/// the approach velocity is `dot(motion_A − motion_B, normal_A→B)`:
+///
+/// - Positive and above `convergence_threshold` → [`Self::Convergent`].
+/// - Negative and below the negative threshold → [`Self::Divergent`].
+/// - Otherwise → [`Self::Transform`].
+///
+/// Stored per tile in [`TectonicData::boundary_type`] and used in step 6
+/// to select the elevation modifier for each boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoundaryType {
+    /// Plates moving toward each other.
+    ///
+    /// Continental–continental: produces mountain ranges.
+    /// Continental–oceanic: produces coastal mountains and subduction trenches.
+    /// Oceanic–oceanic: produces island arcs.
+    Convergent,
+    /// Plates moving apart.
+    ///
+    /// Continental–continental: produces rift valleys.
+    /// Oceanic–oceanic: produces mid-ocean ridges.
+    Divergent,
+    /// Relative motion is mostly tangential — plates sliding past each
+    /// other. Produces minor faulting but no significant elevation change.
+    Transform,
+}
+
+/// A tectonic plate identifier. Index into [`TectonicData::seeds`]
+/// and [`TectonicData::plates`].
+///
+/// `u8` is sufficient because
+/// [`crate::params::MAX_TARGET_PLATE_COUNT`] is 32,
+/// well within `u8::MAX`.
+pub type PlateId = u8;
+
+// ------------- Plate properties -------------
+
+/// The geological type of a tectonic plate.
+///
+/// Determines the plate's base elevation before boundary effects and
+/// noise are applied. Continental plates sit above the notional zero
+/// line; oceanic plates sit below it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlateType {
+    /// Lighter silicic crust. Base elevation is positive, producing
+    /// land when sea level is applied.
+    Continental,
+    /// Denser mafic crust. Base elevation is negative, producing
+    /// ocean when sea level is applied.
+    Oceanic,
+}
+
+/// The dominant mineral character of a tectonic plate.
+///
+/// Used by the resource placement stage (design §1.13) to give plates
+/// characteristic resource monopolies — iron-rich plates produce more
+/// strategic metals, gem-bearing plates produce luxury deposits, and so
+/// on. The exact resource mapping is content data (RON config); this
+/// enum is the generation-time token that drives the lookup.
+///
+/// Variants are intentionally coarse geological categories rather than
+/// specific resources, so the mapping from character to resource can be
+/// tuned independently of generation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MineralCharacter {
+    /// Rich in ferrous metals (iron, nickel). Common.
+    Ferrous,
+    /// Rich in precious metals (gold, silver, copper). Uncommon.
+    Precious,
+    /// Rich in gemstones (diamonds, emeralds). Rare.
+    Gems,
+    /// Rich in hydrocarbon deposits (oil, coal, gas). Common.
+    Hydrocarbons,
+    /// Rich in industrial minerals (stone, salt, clay). Common.
+    Industrial,
+}
+
+impl MineralCharacter {
+    /// All variants in definition order, used for weighted random
+    /// selection.
+    pub(crate) const ALL: &'static [Self] = &[
+        Self::Ferrous,
+        Self::Precious,
+        Self::Gems,
+        Self::Hydrocarbons,
+        Self::Industrial,
+    ];
+}
+
+/// A 2D motion vector representing the notional drift of a tectonic
+/// plate.
+///
+/// The components are dimensionless — the scale has no physical
+/// meaning. Only the *relative* motion between adjacent plates matters
+/// for boundary classification (step 5): whether two plates are moving
+/// toward, away from, or parallel to each other.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MotionVector {
+    /// East-west component. Positive is eastward.
+    pub dx: f32,
+    /// North-south component. Positive is southward.
+    pub dy: f32,
+}
+
+/// The full set of properties assigned to a single tectonic plate in
+/// step 4.
+///
+/// Indexed by [`PlateId`] in [`TectonicData::plates`]. The
+/// corresponding seed coordinate is at the same index in
+/// [`TectonicData::seeds`].
+#[derive(Debug, Clone)]
+pub struct Plate {
+    /// Geological type, determining base elevation.
+    pub plate_type: PlateType,
+    /// Notional drift vector for boundary classification.
+    pub motion: MotionVector,
+    /// Dominant mineral character for resource placement.
+    pub mineral_character: MineralCharacter,
+}
+
+// ------------- Per-stage sub-structures -------------
+
+/// Data produced by the tectonics stage (Stage 3.1, design §1.9).
+///
+/// Fields are populated incrementally by each implementation step:
+/// - Step 1: [`Self::seeds`]
+/// - Steps 2–3: [`Self::plate_id`]
+/// - Step 4: [`Self::plates`]
+/// - Step 5: [`Self::boundary_type`]
+/// - Steps 6–7: [`Self::elevation`]
+/// - Step 8: [`Self::height_level`]
+/// - Step 9: [`Self::is_hilly`]
+///
+/// See `IMPLEMENTATION_PLAN.md` §3.1 for the full step roster.
+#[derive(Debug, Clone)]
+pub struct TectonicData {
+    /// Plate seed coordinates produced by Poisson-disk sampling (step 1).
+    ///
+    /// Each entry is the axial coordinate of one plate's seed point.
+    /// The index of a seed in this vector is its [`PlateId`].
+    ///
+    /// Order reflects Bridson insertion order — deterministic for a
+    /// given `(params, seed)` but not geographically sorted.
+    pub seeds: Vec<Coord>,
+
+    /// Per-tile plate assignment produced by noise-perturbed Voronoi
+    /// partition (steps 2–3).
+    ///
+    /// Each cell holds the [`PlateId`] of the plate that owns the tile.
+    /// The value is an index into [`Self::seeds`] and [`Self::plates`].
+    pub plate_id: Field<PlateId>,
+
+    /// Per-plate properties assigned in step 4.
+    ///
+    /// Indexed by [`PlateId`]. Parallel to [`Self::seeds`]: entry `i`
+    /// describes the plate whose seed is at `seeds[i]`.
+    pub plates: Vec<Plate>,
+
+    /// Per-tile boundary classification produced in step 5.
+    ///
+    /// `None` for interior tiles (no adjacent tile belongs to a
+    /// different plate). `Some(`[`BoundaryType`]`)` for boundary tiles,
+    /// carrying the most geologically significant boundary type among
+    /// all adjacent plate pairs (convergent > divergent > transform).
+    pub boundary_type: Field<Option<BoundaryType>>,
+
+    /// Continuous elevation field produced by steps 6–7 and normalised
+    /// in step 8 so that sea level = 0.
+    ///
+    /// Values are dimensionless with typical range roughly ±1.5.
+    /// Positive values are above sea level; negative values are below.
+    pub elevation: Field<f32>,
+
+    /// Discrete height-level assigned to each tile in step 8.
+    ///
+    /// Encoding (for the default `land_level_count = 3`):
+    /// `0` = ocean, `1` = coast, `2`–`4` = land levels (low to high),
+    /// `5` = mountain. The level count is `land_level_count + 3`;
+    /// thresholds are computed by quantile-matching `level_proportions`.
+    pub height_level: Field<u8>,
+
+    /// Per-tile roughness attribute produced in step 9.
+    ///
+    /// `true` means the tile is "hilly": it reduces movement speed and
+    /// provides a combat bonus, independent of its height level. Hills
+    /// are more common near tectonic boundaries and are spatially
+    /// correlated via a noise field.
+    pub is_hilly: Field<bool>,
+}
+
+impl TectonicData {
+    /// Constructs an empty [`TectonicData`] for the given map bounds.
+    ///
+    /// All fields are empty or zero-initialised. Real values are filled
+    /// in by the tectonics stage steps.
+    #[must_use]
+    pub fn empty(bounds: MapBounds) -> Self {
+        Self {
+            seeds: Vec::new(),
+            plate_id: Field::filled(bounds, 0),
+            plates: Vec::new(),
+            boundary_type: Field::filled(bounds, None),
+            elevation: Field::filled(bounds, 0.0),
+            height_level: Field::filled(bounds, 0),
+            is_hilly: Field::filled(bounds, false),
+        }
+    }
+}
+
+// ------------- Top-level output -------------
 
 /// The finalized output of the generation pipeline, consumed by the
 /// `game` crate to spawn world entities.
 ///
-/// # Current scope
+/// Each Stage 3 sub-stage extends this type with a new field:
 ///
-/// As of Stage 2 this type only carries the [`MapBounds`] of the
-/// generated world. Each Stage 3 sub-stage will add its own field:
+/// - Stage 3.1 (tectonics) → [`TectonicData`]
+/// - Stage 3.2 (climate) → `ClimateData` (not yet added)
+/// - Stage 3.3 (hydrology) → `HydrologyData` (not yet added)
+/// - Stage 3.4 (biomes) → `BiomeData` (not yet added)
+/// - Stage 3.5 (resources) → `ResourceData` (not yet added)
+/// - Stage 3.6 (starting positions) → `Vec<Coord>` (not yet added)
 ///
-/// - 3.1 tectonics → `elevation: Field<f32>`, `height_levels: Field<HeightLevel>`,
-///   `plate_id: Field<PlateId>`, plus per-plate metadata.
-/// - 3.2 climate → `temperature: Field<f32>`, `moisture: Field<f32>`,
-///   `precipitation: Field<f32>`.
-/// - 3.3 hydrology → `rivers`, `lakes`, `floodplains`, `canyons`.
-/// - 3.4 biomes → `biome: Field<Biome>`, plus feature passes.
-/// - 3.5 resources → `resources: Field<Option<Resource>>`.
-/// - 3.6 starting positions → `start_positions: Vec<Coord>`.
-///
-/// Fields are added in pipeline order as each sub-stage lands, so the
-/// shape of each sub-structure is fixed by the algorithm that fills it
-/// rather than guessed up front. See `IMPLEMENTATION_PLAN.md` §3.
+/// See `IMPLEMENTATION_PLAN.md` §3 for the full list.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct WorldData {
-    /// Map dimensions. Read by every consumer that needs to interpret
-    /// any [`crate::Field`] also held in [`WorldData`].
+    /// Map dimensions. Required to interpret any [`crate::Field`]
+    /// stored elsewhere in this struct.
     pub bounds: MapBounds,
+
+    /// Output of the tectonics stage (design §1.9).
+    pub tectonics: TectonicData,
 }
 
 impl WorldData {
-    /// Constructs a new [`WorldData`] for a world with the given
-    /// bounds and no other content.
-    ///
-    /// This is the constructor used by the Stage 2 stub
-    /// [`crate::generate_world`] entry point; each Stage 3 sub-stage
-    /// will extend it (or, more likely, a builder counterpart) with
-    /// additional fields.
+    /// Constructs a [`WorldData`] with the given bounds and empty
+    /// sub-structures.
     #[must_use]
-    pub const fn new(bounds: MapBounds) -> Self {
-        Self { bounds }
+    pub fn new(bounds: MapBounds) -> Self {
+        Self {
+            bounds,
+            tectonics: TectonicData::empty(bounds),
+        }
     }
 }
