@@ -1,0 +1,49 @@
+// Default TectonicsParams — matches TectonicsParams::defaults().
+// Copy this file, rename it, and edit values to create a named preset.
+// Pass it to maptest or mapdump with --params <file>.
+//
+// level_proportions: [ocean, coast, low_land, mid_land, high_land, mountain]
+//   Must have (land_level_count + 3) entries summing to 1.0.
+// mineral_weights: [Ferrous, Precious, Gems, Hydrocarbons, Industrial]
+//   Relative weights — normalised internally before sampling.
+(
+    // Step 1 — Plate seed placement
+    target_plate_count: 10,
+
+    // Steps 2–3 — Voronoi + boundary perturbation
+    boundary_perturbation_amplitude: 8.0,
+
+    // Step 4 — Plate properties
+    motion_magnitude_min: 0.5,
+    motion_magnitude_max: 1.5,
+    mineral_weights: [4.0, 2.0, 1.0, 3.0, 4.0],
+
+    // Step 5 — Boundary classification
+    convergence_threshold: 0.3,
+
+    // Steps 6–7 — Elevation field
+    continental_base_elevation: 0.3,
+    oceanic_base_elevation: -0.3,
+    intra_plate_noise_amplitude: 0.05,
+    intra_plate_noise_frequency: 2.0,
+    boundary_falloff_sigma: 8.0,
+    mountain_elevation_boost: 1.2,
+    coastal_mountain_boost: 0.8,
+    subduction_trench_penalty: -0.8,
+    island_arc_boost: 0.4,
+    rift_valley_penalty: -0.4,
+    mid_ocean_ridge_boost: 0.3,
+    detail_noise_amplitude: 0.08,
+    detail_noise_frequency: 4.0,
+    detail_noise_octaves: 3,
+
+    // Step 8 — Sea level + quantile thresholding
+    land_level_count: 3,
+    level_proportions: [0.35, 0.05, 0.25, 0.20, 0.10, 0.05],
+
+    // Step 9 — Hills classification
+    hill_influence_radius: 8,
+    hill_near_boundary_threshold: -0.2,
+    hill_interior_threshold: 0.55,
+    hill_noise_frequency: 5.0,
+)

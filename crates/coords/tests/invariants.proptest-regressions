@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 45654bec2f1bfbb9cadfba0024da4ab07e83e383f35eded1bf9f4bc26468e6ec # shrinks to bounds = MapBounds { width: 1, height: 13 }, coord = Coord { q: 0, r: 0 }

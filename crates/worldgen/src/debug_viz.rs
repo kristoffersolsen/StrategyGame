@@ -448,6 +448,58 @@ const CATEGORICAL_PALETTE: [[u8; 3]; 12] = [
     [255, 237, 111],
 ];
 
+// ------------- Domain-specific colormaps -------------
+
+/// Four-colour map for tectonic boundary types (step 5).
+///
+/// Maps the encoded float produced by the boundary-type `to_f32` closure:
+/// - `0.0` (interior) → near-black
+/// - `1.0` (transform) → mid-grey
+/// - `2.0` (divergent) → blue
+/// - `3.0` (convergent) → red
+pub struct BoundaryCmap;
+
+impl Colormap for BoundaryCmap {
+    fn color(&self, value: f32) -> [u8; 3] {
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        match (value.round() as u8).min(3) {
+            0 => [30, 30, 30],    // interior  — near-black
+            1 => [140, 140, 140], // transform — grey
+            2 => [60, 120, 220],  // divergent — blue
+            _ => [220, 60, 60],   // convergent — red
+        }
+    }
+}
+
+/// Colour map for the six discrete height levels produced by step 8.
+///
+/// Assumes the default `land_level_count = 3` (six levels total).
+/// If that parameter is changed the palette should be extended to
+/// cover the additional levels.
+///
+/// Level → colour:
+/// - `0` ocean      → dark blue  `[15, 55, 120]`
+/// - `1` coast      → light blue `[80, 155, 215]`
+/// - `2` low land   → orange     `[230, 155, 55]`
+/// - `3` mid land   → orange-red `[205, 85, 30]`
+/// - `4` high land  → red        `[175, 40, 20]`
+/// - `5` mountain   → deep red   `[130, 15, 15]`
+pub struct HeightLevelCmap;
+
+impl Colormap for HeightLevelCmap {
+    fn color(&self, value: f32) -> [u8; 3] {
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        match (value.round() as u8).min(5) {
+            0 => [15, 55, 120],  // ocean      — dark blue
+            1 => [80, 155, 215], // coast      — light blue
+            2 => [230, 155, 55], // low land   — orange
+            3 => [205, 85, 30],  // mid land   — orange-red
+            4 => [175, 40, 20],  // high land  — red
+            _ => [130, 15, 15],  // mountain   — deep red
+        }
+    }
+}
+
 // ------------- Seed overlay -------------
 
 /// Writes a pixel-per-tile PNG of `base_field` with `seeds` painted

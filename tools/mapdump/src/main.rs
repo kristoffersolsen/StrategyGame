@@ -8,8 +8,15 @@
 //!
 //! ```text
 //! mapdump --seed 42 --output /tmp/map-debug/
+//! mapdump --seed 42 --output /tmp/map-debug/ --params presets/default.ron
 //! mapdump --seed 42 --output /tmp/map-debug/ --size large --hex-size 6
 //! ```
+//!
+//! # Tectonics parameter overrides
+//!
+//! Pass `--params <file.ron>` to load a [`TectonicsParams`] from a RON
+//! file instead of using defaults. Use the `maptest` tool for multi-seed
+//! runs and parameter-range sweeps.
 //!
 //! # Output
 //!
@@ -53,8 +60,8 @@
 //! ## Stage 3.1 — Tectonics step 8: height levels
 //!
 //! - `31_08_height_levels_px.png` — one-pixel-per-tile discrete height
-//!   level (0 = ocean, 1 = coast, 2+ = land, last = mountain) using the
-//!   categorical palette. Primary visual for tuning `level_proportions`.
+//!   level (0 = ocean, 1 = coast, 2+ = land, last = mountain). Primary
+//!   visual for tuning `level_proportions`.
 //! - `31_08_height_levels_hex.png` — hex-rasterized version of the same.
 //!
 //! ## Stage 3.1 — Tectonics step 9: hills
@@ -69,10 +76,10 @@ use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use tracing::info;
 use worldgen::{
-    BasicParams, BoundaryType, Field, MapSize, TectonicData, WorldParams,
+    BasicParams, BoundaryType, Field, MapSize, TectonicData, TectonicsParams, WorldParams,
     debug_viz::{
-        Categorical, Colormap, Grayscale, Viridis, dump_field_hex, dump_field_pixels,
-        dump_field_with_seed_overlay,
+        BoundaryCmap, Categorical, Grayscale, HeightLevelCmap, Viridis, dump_field_hex,
+        dump_field_pixels, dump_field_with_seed_overlay,
     },
     generate_world,
 };
@@ -97,7 +104,9 @@ fn main() -> Result<()> {
         )
     })?;
 
-    let params = WorldParams {
+    let tectonics = load_tectonics_params(args.params.as_deref())?;
+
+    let mut params = WorldParams {
         seed: args.seed,
         basic: BasicParams {
             map_size: args.size.into(),
@@ -105,6 +114,7 @@ fn main() -> Result<()> {
         },
         ..WorldParams::default()
     };
+    params.tuning.tectonics = tectonics;
 
     info!("running generate_world");
     let world = generate_world(&params).context("world generation failed")?;
@@ -127,6 +137,22 @@ fn main() -> Result<()> {
 
     info!("done");
     Ok(())
+}
+
+// ------------- Parameter loading -------------
+
+fn load_tectonics_params(path: Option<&Path>) -> Result<TectonicsParams> {
+    let Some(p) = path else {
+        return Ok(TectonicsParams::defaults());
+    };
+    let content = std::fs::read_to_string(p)
+        .with_context(|| format!("failed to read params file: {}", p.display()))?;
+    ron::from_str(&content).with_context(|| {
+        format!(
+            "failed to parse params file as TectonicsParams: {}",
+            p.display()
+        )
+    })
 }
 
 // ------------- Output helpers (one per stage group) -------------
@@ -336,57 +362,6 @@ fn write_tectonics_elevation_and_levels(
     Ok(())
 }
 
-// ------------- Custom colormaps for mapdump -------------
-
-/// Four-colour map for boundary types.
-///
-/// 0 (interior) → near-black, 1 (transform) → mid-grey,
-/// 2 (divergent) → blue, 3 (convergent) → red.
-struct BoundaryCmap;
-
-/// Six-colour map for height levels produced by Stage 3.1 step 8.
-///
-/// Levels are passed as floats `0.0`–`5.0` (from the `u8` height-level
-/// field via `f32::from`):
-///
-/// - 0 (ocean)   → dark blue
-/// - 1 (coast)   → light blue
-/// - 2 (low land)  → orange
-/// - 3 (mid land)  → orange-red
-/// - 4 (high land) → red
-/// - 5 (mountain)  → deep red
-///
-/// Matches the default `land_level_count = 3` (6 total levels). If that
-/// parameter is changed, extend this palette to cover additional levels.
-struct HeightLevelCmap;
-
-impl Colormap for BoundaryCmap {
-    fn color(&self, value: f32) -> [u8; 3] {
-        // Quantise to the four boundary levels.
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        match (value.round() as u8).min(3) {
-            0 => [30, 30, 30],    // interior — near-black
-            1 => [140, 140, 140], // transform — grey
-            2 => [60, 120, 220],  // divergent — blue
-            _ => [220, 60, 60],   // convergent — red
-        }
-    }
-}
-
-impl Colormap for HeightLevelCmap {
-    fn color(&self, value: f32) -> [u8; 3] {
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        match (value.round() as u8).min(5) {
-            0 => [15, 55, 120],  // ocean      — dark blue
-            1 => [80, 155, 215], // coast      — light blue
-            2 => [230, 155, 55], // low land   — orange
-            3 => [205, 85, 30],  // mid land   — orange-red
-            4 => [175, 40, 20],  // high land  — red
-            _ => [130, 15, 15],  // mountain   — deep red
-        }
-    }
-}
-
 // ------------- CLI argument types -------------
 
 /// Generates world-generation debug PNGs from a seed and parameter set.
@@ -410,6 +385,11 @@ struct Args {
     /// At `medium` map size: size 8 → ~20 MB, size 4 → ~5 MB.
     #[arg(long, default_value_t = 8)]
     hex_size: u32,
+
+    /// Optional RON file containing a `TectonicsParams` struct to use
+    /// instead of defaults. Use `maptest` for multi-seed runs and sweeps.
+    #[arg(long)]
+    params: Option<PathBuf>,
 }
 
 /// Map size argument. Maps directly to [`MapSize`].

@@ -257,7 +257,7 @@ const DEFAULT_MINERAL_WEIGHTS: [f32; 5] = [4.0, 2.0, 1.0, 3.0, 4.0];
 /// breaks every committed reference hash. Treat default changes the
 /// same as algorithmic changes — they require an intentional
 /// reference-hash refresh.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TectonicsParams {
     /// Target number of tectonic plates the Poisson-disk seed stage
     /// should produce.
