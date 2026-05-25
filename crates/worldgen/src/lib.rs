@@ -18,7 +18,7 @@
 //! tuning impossible.
 //!
 //! The full RNG-threading strategy is documented in
-//! `docs/adr/0001-infra-determinism-and-rng-threading.md`.
+//! `docs/adr/0001-determinism-and-rng-threading.md`.
 //!
 //! Hard rules enforced by lints and review:
 //! - No `rand::thread_rng` / `rand::rng` anywhere in the workspace.
@@ -58,11 +58,14 @@ mod world_data;
 pub use error::GenerationError;
 pub use field::Field;
 pub use params::{
-    AdvancedParams, BasicParams, ClimateBand, MAX_BOUNDARY_PERTURBATION_AMPLITUDE,
-    MAX_LAND_LEVEL_COUNT, MAX_TARGET_PLATE_COUNT, MIN_LAND_LEVEL_COUNT, MIN_TARGET_PLATE_COUNT,
+    AdvancedParams, BasicParams, ClimateBand, MAX_DETAIL_NOISE_OCTAVES, MAX_LAND_LEVEL_COUNT,
+    MAX_TARGET_PLATE_COUNT, MIN_DETAIL_NOISE_OCTAVES, MIN_LAND_LEVEL_COUNT, MIN_TARGET_PLATE_COUNT,
     MapArchetype, MapSize, ResourceAbundance, TectonicsParams, TuningParams, WorldAge, WorldParams,
 };
-pub use world_data::{PlateId, TectonicData, WorldData};
+pub use world_data::{
+    BoundaryType, MineralCharacter, MotionVector, Plate, PlateId, PlateType, TectonicData,
+    WorldData,
+};
 
 use coords::MapBounds;
 use rng::{MasterRng, StageId};

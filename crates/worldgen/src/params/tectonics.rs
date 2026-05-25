@@ -8,6 +8,7 @@
 //! See `IMPLEMENTATION_PLAN.md` §3.1 for the step-by-step rollout.
 
 use crate::error::GenerationError;
+use crate::world_data::MineralCharacter;
 
 // ------------- Hard limits -------------
 
@@ -75,6 +76,125 @@ const DEFAULT_LEVEL_PROPORTIONS: [f32; 6] = [0.35, 0.05, 0.25, 0.20, 0.10, 0.05]
 /// genuinely malformed inputs.
 const LEVEL_PROPORTIONS_SUM_TOLERANCE: f32 = 1e-4;
 
+/// Default value for [`TectonicsParams::convergence_threshold`].
+///
+/// A dot-product threshold of 0.3 is roughly 15–20 % of the maximum
+/// possible approach speed (which is 2 × the maximum motion magnitude,
+/// around 3.0). At this level, most boundaries are classified as
+/// convergent or divergent rather than transform unless the relative
+/// motion is nearly tangential.
+const DEFAULT_CONVERGENCE_THRESHOLD: f32 = 0.3;
+
+/// Default base elevation of continental plates (steps 6–7).
+///
+/// Chosen so that the continental base is comfortably above sea level
+/// after the quantile-normalisation pass in step 8. The exact value
+/// affects the width of the continental interior but not the final
+/// land fraction (which is enforced by `level_proportions`).
+const DEFAULT_CONTINENTAL_BASE_ELEVATION: f32 = 0.3;
+
+/// Default base elevation of oceanic plates (steps 6–7).
+///
+/// The magnitude matches `DEFAULT_CONTINENTAL_BASE_ELEVATION` so that
+/// the base elevation has zero mean across a world with equal land and
+/// ocean fractions.
+const DEFAULT_OCEANIC_BASE_ELEVATION: f32 = -0.3;
+
+/// Default amplitude of intra-plate elevation noise (step 6).
+///
+/// Low amplitude keeps the interior of each plate relatively flat,
+/// letting boundary effects dominate the topographic structure.
+const DEFAULT_INTRA_PLATE_NOISE_AMPLITUDE: f32 = 0.05;
+
+/// Default spatial frequency of intra-plate elevation noise (step 6).
+///
+/// Scales the noise-input coordinates uniformly; higher values produce
+/// finer detail within plates. The underlying scale follows the torus
+/// convention from `perturbation.rs`.
+const DEFAULT_INTRA_PLATE_NOISE_FREQUENCY: f32 = 2.0;
+
+/// Default Gaussian falloff sigma for boundary-effect propagation.
+///
+/// The standard deviation of the Gaussian that spreads each boundary
+/// tile's elevation modifier into surrounding tiles. At `σ = 8` tiles,
+/// the effect is ~61 % of peak at 1σ and ~1 % at 3σ (24 tiles).
+const DEFAULT_BOUNDARY_FALLOFF_SIGMA: f32 = 8.0;
+
+/// Default elevation boost for continental–continental convergent
+/// boundaries (step 6). Produces high mountain ranges.
+const DEFAULT_MOUNTAIN_ELEVATION_BOOST: f32 = 1.2;
+
+/// Default elevation boost for the continental side of a
+/// continental–oceanic convergent boundary (step 6).
+/// Produces coastal mountain ranges.
+const DEFAULT_COASTAL_MOUNTAIN_BOOST: f32 = 0.8;
+
+/// Default elevation penalty for the oceanic side of a
+/// continental–oceanic convergent boundary (step 6).
+/// Produces subduction trenches. Stored as a negative value.
+const DEFAULT_SUBDUCTION_TRENCH_PENALTY: f32 = -0.8;
+
+/// Default elevation boost for oceanic–oceanic convergent boundaries
+/// (step 6). Produces island arcs.
+const DEFAULT_ISLAND_ARC_BOOST: f32 = 0.4;
+
+/// Default elevation penalty for continental–continental divergent
+/// boundaries (step 6). Produces rift valleys. Stored as a negative
+/// value.
+const DEFAULT_RIFT_VALLEY_PENALTY: f32 = -0.4;
+
+/// Default elevation boost for oceanic–oceanic divergent boundaries
+/// (step 6). Produces mid-ocean ridges.
+const DEFAULT_MID_OCEAN_RIDGE_BOOST: f32 = 0.3;
+
+/// Default amplitude of the multi-octave detail-noise overlay (step 7).
+///
+/// Added uniformly over the elevation field to break up flat regions.
+/// Lower than the plate and boundary signal so it does not dominate.
+const DEFAULT_DETAIL_NOISE_AMPLITUDE: f32 = 0.08;
+
+/// Default spatial frequency of the multi-octave detail noise (step 7).
+const DEFAULT_DETAIL_NOISE_FREQUENCY: f32 = 4.0;
+
+/// Minimum allowed value for
+/// [`TectonicsParams::detail_noise_octaves`].
+pub const MIN_DETAIL_NOISE_OCTAVES: u8 = 1;
+
+/// Maximum allowed value for
+/// [`TectonicsParams::detail_noise_octaves`].
+///
+/// Above eight octaves the additional high-frequency content is below
+/// the one-tile resolution of the grid.
+pub const MAX_DETAIL_NOISE_OCTAVES: u8 = 8;
+
+/// Default number of octaves for the multi-octave detail noise (step 7).
+const DEFAULT_DETAIL_NOISE_OCTAVES: u8 = 3;
+
+/// Default influence radius for tectonic boundary proximity in the
+/// hills pass (step 9), in tiles.
+///
+/// Tiles within this hex-distance of a boundary receive a hilliness
+/// probability bonus.
+const DEFAULT_HILL_INFLUENCE_RADIUS: u32 = 8;
+
+/// Default hilliness noise threshold for tiles near a tectonic
+/// boundary (step 9).
+///
+/// The hill-noise value (`OpenSimplex`, approximately `[−1, 1]`) at a
+/// tile is compared against this threshold. Tiles whose noise value
+/// exceeds the threshold are classified as hilly. A lower threshold
+/// → more hilly tiles near boundaries.
+const DEFAULT_HILL_NEAR_BOUNDARY_THRESHOLD: f32 = -0.2;
+
+/// Default hilliness noise threshold for tiles far from any tectonic
+/// boundary (step 9).
+///
+/// Applies to tiles beyond `hill_influence_radius` of any boundary.
+const DEFAULT_HILL_INTERIOR_THRESHOLD: f32 = 0.55;
+
+/// Default spatial frequency of the hilliness noise field (step 9).
+const DEFAULT_HILL_NOISE_FREQUENCY: f32 = 5.0;
+
 /// Default value for
 /// [`TectonicsParams::boundary_perturbation_amplitude`].
 ///
@@ -92,7 +212,35 @@ const DEFAULT_BOUNDARY_PERTURBATION_AMPLITUDE: f32 = 8.0;
 /// fragments and disconnected regions. The plate spacing for 10 plates
 /// on a 240×150 map is approximately 34 tiles (the Poisson disk
 /// radius), so the maximum is set conservatively at 20.
-pub const MAX_BOUNDARY_PERTURBATION_AMPLITUDE: f32 = 20.0;
+pub(crate) const MAX_BOUNDARY_PERTURBATION_AMPLITUDE: f32 = 20.0;
+
+/// Default minimum magnitude of a plate motion vector.
+///
+/// Motion vectors are drawn with a magnitude uniformly distributed in
+/// `[motion_magnitude_min, motion_magnitude_max]`. The magnitude scale
+/// has no physical unit — only relative magnitudes between adjacent
+/// plates matter for boundary classification.
+const DEFAULT_MOTION_MAGNITUDE_MIN: f32 = 0.5;
+
+/// Default maximum magnitude of a plate motion vector.
+///
+/// See [`DEFAULT_MOTION_MAGNITUDE_MIN`]. The 3:1 max-to-min ratio
+/// produces enough spread that adjacent plates have meaningfully
+/// different speeds, driving a useful mix of boundary types, without
+/// allowing any one plate to completely dominate its neighbors.
+const DEFAULT_MOTION_MAGNITUDE_MAX: f32 = 1.5;
+
+/// Weights for the uniform mineral character distribution (step 4).
+///
+/// One entry per [`MineralCharacter`] variant, in the order defined
+/// by [`MineralCharacter::ALL`]. Higher values make that character
+/// more common. Values are relative — they are normalised internally
+/// before sampling.
+///
+/// Default distribution: Ferrous and Industrial are common (4 parts
+/// each), Hydrocarbons are moderately common (3 parts), Precious is
+/// uncommon (2 parts), and Gems are rare (1 part).
+const DEFAULT_MINERAL_WEIGHTS: [f32; 5] = [4.0, 2.0, 1.0, 3.0, 4.0];
 
 // ------------- Parameter struct -------------
 
@@ -138,7 +286,7 @@ pub struct TectonicsParams {
     /// Quantile-target proportions for the discrete height bands.
     ///
     /// Must have exactly `land_level_count + 3` entries summing to
-    /// `1.0 ± 1e-4`. Order: index 0 is
+    /// `1.0 ± LEVEL_PROPORTIONS_SUM_TOLERANCE`. Order: index 0 is
     /// ocean, index 1 is coast, indices `2..=land_level_count+1` are
     /// the land levels in ascending order (lowland first), and the
     /// final index is mountain.
@@ -160,16 +308,189 @@ pub struct TectonicsParams {
     /// a straight Voronoi diagram; at the default value the boundaries
     /// become organic and geographically plausible.
     ///
-    /// Range: `0.0..=`[`MAX_BOUNDARY_PERTURBATION_AMPLITUDE`].
+    /// Range: `0.0..=MAX_BOUNDARY_PERTURBATION_AMPLITUDE`.
     /// Default: 8.0 tiles.
     pub boundary_perturbation_amplitude: f32,
+
+    /// Minimum magnitude of a plate motion vector (step 4).
+    ///
+    /// Motion vector magnitudes are drawn uniformly from
+    /// `[motion_magnitude_min, motion_magnitude_max]`. The scale is
+    /// dimensionless — only relative magnitudes between adjacent
+    /// plates affect boundary classification.
+    ///
+    /// Must be `> 0.0` and `≤ motion_magnitude_max`.
+    /// Default: 0.5.
+    pub motion_magnitude_min: f32,
+
+    /// Maximum magnitude of a plate motion vector (step 4).
+    ///
+    /// See [`Self::motion_magnitude_min`]. A wider range produces more
+    /// varied boundary types; a narrow range (min ≈ max) produces
+    /// mostly transform boundaries because plates move at similar
+    /// speeds.
+    ///
+    /// Must be `≥ motion_magnitude_min`.
+    /// Default: 1.5.
+    pub motion_magnitude_max: f32,
+
+    /// Relative weights for sampling [`MineralCharacter`] variants
+    /// (step 4).
+    ///
+    /// Must have exactly one entry per [`MineralCharacter`] variant,
+    /// in the order defined by `MineralCharacter::ALL`. All entries
+    /// must be finite and `≥ 0.0`; at least one must be `> 0.0`.
+    /// Values are relative — they are normalised before sampling, so
+    /// `[1.0, 1.0]` and `[4.0, 4.0]` are equivalent.
+    ///
+    /// Default: Ferrous 4, Precious 2, Gems 1, Hydrocarbons 3,
+    /// Industrial 4 — Gems rare, Precious uncommon, others common.
+    pub mineral_weights: Vec<f32>,
+
+    // ------------- Step 5: boundary classification -------------
+    /// Minimum absolute approach velocity to classify as convergent or
+    /// divergent (rather than transform) in step 5.
+    ///
+    /// The approach velocity is `dot(motion_A − motion_B, normal_A→B)`.
+    /// If the absolute value is above this threshold the boundary is
+    /// convergent (positive) or divergent (negative); otherwise it is
+    /// transform.
+    ///
+    /// Range: `0.0..=∞` (finite). Default: 0.3.
+    /// Raising toward `motion_magnitude_max` produces more transform
+    /// boundaries; `0.0` makes every boundary convergent or divergent.
+    pub convergence_threshold: f32,
+
+    // ------------- Steps 6–7: elevation field -------------
+    /// Base elevation assigned to tiles on continental plates, before
+    /// noise and boundary effects are applied (step 6).
+    ///
+    /// Must be finite. Default: 0.3.
+    pub continental_base_elevation: f32,
+
+    /// Base elevation assigned to tiles on oceanic plates, before
+    /// noise and boundary effects are applied (step 6).
+    ///
+    /// Must be finite. Default: −0.3.
+    pub oceanic_base_elevation: f32,
+
+    /// Amplitude of the intra-plate noise overlay added on top of the
+    /// per-plate base elevation (step 6).
+    ///
+    /// Must be finite and `≥ 0.0`. Default: 0.05.
+    pub intra_plate_noise_amplitude: f32,
+
+    /// Spatial frequency multiplier for the intra-plate noise (step 6).
+    ///
+    /// Scales the noise-input coordinates; `1.0` matches the spatial
+    /// frequency of `boundary_perturbation_amplitude`. Must be finite
+    /// and `> 0.0`. Default: 2.0.
+    pub intra_plate_noise_frequency: f32,
+
+    /// Standard deviation of the Gaussian used to propagate boundary
+    /// elevation modifiers into surrounding tiles (step 6), in tiles.
+    ///
+    /// Effects fall to ~1 % of peak at 3σ. Must be finite and `> 0.0`.
+    /// Default: 8.0 tiles.
+    pub boundary_falloff_sigma: f32,
+
+    /// Elevation modifier at continental–continental convergent
+    /// boundaries (step 6). Produces high mountain ranges.
+    ///
+    /// Must be finite. Default: 1.2.
+    pub mountain_elevation_boost: f32,
+
+    /// Elevation modifier for the continental side of a
+    /// continental–oceanic convergent boundary (step 6).
+    /// Produces coastal mountain ranges.
+    ///
+    /// Must be finite. Default: 0.8.
+    pub coastal_mountain_boost: f32,
+
+    /// Elevation modifier for the oceanic side of a
+    /// continental–oceanic convergent boundary (step 6).
+    /// Produces subduction trenches. Typically negative.
+    ///
+    /// Must be finite. Default: −0.8.
+    pub subduction_trench_penalty: f32,
+
+    /// Elevation modifier at oceanic–oceanic convergent boundaries
+    /// (step 6). Produces island arcs.
+    ///
+    /// Must be finite. Default: 0.4.
+    pub island_arc_boost: f32,
+
+    /// Elevation modifier at continental–continental divergent
+    /// boundaries (step 6). Produces rift valleys. Typically negative.
+    ///
+    /// Must be finite. Default: −0.4.
+    pub rift_valley_penalty: f32,
+
+    /// Elevation modifier at oceanic–oceanic divergent boundaries
+    /// (step 6). Produces mid-ocean ridges.
+    ///
+    /// Must be finite. Default: 0.3.
+    pub mid_ocean_ridge_boost: f32,
+
+    /// Amplitude of the multi-octave detail-noise overlay added over
+    /// the full elevation field (step 7).
+    ///
+    /// Must be finite and `≥ 0.0`. Default: 0.08.
+    pub detail_noise_amplitude: f32,
+
+    /// Spatial frequency multiplier for the detail-noise overlay
+    /// (step 7).
+    ///
+    /// Must be finite and `> 0.0`. Default: 4.0.
+    pub detail_noise_frequency: f32,
+
+    /// Number of octaves for the detail-noise overlay (step 7).
+    ///
+    /// Each octave doubles the frequency and halves the amplitude.
+    /// Range: [`MIN_DETAIL_NOISE_OCTAVES`]..=[`MAX_DETAIL_NOISE_OCTAVES`].
+    /// Default: 3.
+    pub detail_noise_octaves: u8,
+
+    // ------------- Step 9: hills -------------
+    /// Hex-distance within which proximity to a tectonic boundary
+    /// increases hill probability (step 9).
+    ///
+    /// Tiles within this radius of a boundary tile have their hilliness
+    /// threshold linearly interpolated toward `hill_near_boundary_threshold`.
+    /// Default: 8 tiles.
+    pub hill_influence_radius: u32,
+
+    /// Hill-noise threshold applied to tiles at a tectonic boundary
+    /// (step 9).
+    ///
+    /// The `OpenSimplex` hill-noise value (approximately `[−1, 1]`) at
+    /// each tile is compared against this threshold. Tiles whose value
+    /// exceeds the threshold are classified as hilly. A lower value
+    /// → more hilly tiles near boundaries. Must be finite.
+    /// Default: −0.2 (≈ 60 % of boundary tiles are hilly).
+    pub hill_near_boundary_threshold: f32,
+
+    /// Hill-noise threshold applied to tiles far from any tectonic
+    /// boundary (step 9).
+    ///
+    /// Applied to tiles beyond `hill_influence_radius` of any boundary.
+    /// Must be finite. Default: 0.55 (≈ 22 % of interior tiles are hilly).
+    pub hill_interior_threshold: f32,
+
+    /// Spatial frequency multiplier for the hilliness noise field
+    /// (step 9).
+    ///
+    /// Higher values produce smaller, more scattered hill patches.
+    /// Must be finite and `> 0.0`. Default: 5.0.
+    pub hill_noise_frequency: f32,
 }
 
 impl TectonicsParams {
     /// Returns the default tectonics parameters.
     ///
     /// `Default` cannot be `const` because [`Self::level_proportions`]
-    /// owns a `Vec`; the [`Default`] impl below delegates here.
+    /// and [`Self::mineral_weights`] own `Vec`s; the [`Default`] impl
+    /// below delegates here.
     #[must_use]
     pub fn defaults() -> Self {
         Self {
@@ -177,6 +498,28 @@ impl TectonicsParams {
             land_level_count: DEFAULT_LAND_LEVEL_COUNT,
             level_proportions: DEFAULT_LEVEL_PROPORTIONS.to_vec(),
             boundary_perturbation_amplitude: DEFAULT_BOUNDARY_PERTURBATION_AMPLITUDE,
+            motion_magnitude_min: DEFAULT_MOTION_MAGNITUDE_MIN,
+            motion_magnitude_max: DEFAULT_MOTION_MAGNITUDE_MAX,
+            mineral_weights: DEFAULT_MINERAL_WEIGHTS.to_vec(),
+            convergence_threshold: DEFAULT_CONVERGENCE_THRESHOLD,
+            continental_base_elevation: DEFAULT_CONTINENTAL_BASE_ELEVATION,
+            oceanic_base_elevation: DEFAULT_OCEANIC_BASE_ELEVATION,
+            intra_plate_noise_amplitude: DEFAULT_INTRA_PLATE_NOISE_AMPLITUDE,
+            intra_plate_noise_frequency: DEFAULT_INTRA_PLATE_NOISE_FREQUENCY,
+            boundary_falloff_sigma: DEFAULT_BOUNDARY_FALLOFF_SIGMA,
+            mountain_elevation_boost: DEFAULT_MOUNTAIN_ELEVATION_BOOST,
+            coastal_mountain_boost: DEFAULT_COASTAL_MOUNTAIN_BOOST,
+            subduction_trench_penalty: DEFAULT_SUBDUCTION_TRENCH_PENALTY,
+            island_arc_boost: DEFAULT_ISLAND_ARC_BOOST,
+            rift_valley_penalty: DEFAULT_RIFT_VALLEY_PENALTY,
+            mid_ocean_ridge_boost: DEFAULT_MID_OCEAN_RIDGE_BOOST,
+            detail_noise_amplitude: DEFAULT_DETAIL_NOISE_AMPLITUDE,
+            detail_noise_frequency: DEFAULT_DETAIL_NOISE_FREQUENCY,
+            detail_noise_octaves: DEFAULT_DETAIL_NOISE_OCTAVES,
+            hill_influence_radius: DEFAULT_HILL_INFLUENCE_RADIUS,
+            hill_near_boundary_threshold: DEFAULT_HILL_NEAR_BOUNDARY_THRESHOLD,
+            hill_interior_threshold: DEFAULT_HILL_INTERIOR_THRESHOLD,
+            hill_noise_frequency: DEFAULT_HILL_NOISE_FREQUENCY,
         }
     }
 
@@ -192,7 +535,8 @@ impl TectonicsParams {
     ///   [`MIN_LAND_LEVEL_COUNT`]..=[`MAX_LAND_LEVEL_COUNT`],
     /// - `level_proportions.len()` does not equal `land_level_count + 3`,
     /// - any entry of `level_proportions` is negative or non-finite,
-    /// - `level_proportions` does not sum to `1.0` within `1e-4`.
+    /// - `level_proportions` does not sum to `1.0` within
+    ///   `LEVEL_PROPORTIONS_SUM_TOLERANCE`.
     pub fn validate(&self) -> Result<(), GenerationError> {
         if !(MIN_TARGET_PLATE_COUNT..=MAX_TARGET_PLATE_COUNT).contains(&self.target_plate_count) {
             return Err(GenerationError::InvalidParams {
@@ -210,7 +554,6 @@ impl TectonicsParams {
                 ),
             });
         }
-
         if !self.boundary_perturbation_amplitude.is_finite()
             || self.boundary_perturbation_amplitude < 0.0
             || self.boundary_perturbation_amplitude > MAX_BOUNDARY_PERTURBATION_AMPLITUDE
@@ -222,8 +565,12 @@ impl TectonicsParams {
                 ),
             });
         }
+        self.validate_level_proportions()?;
+        self.validate_motion_and_minerals()?;
+        self.validate_elevation_and_hill_params()
+    }
 
-        // level_proportions must align with land_level_count.
+    fn validate_level_proportions(&self) -> Result<(), GenerationError> {
         let expected_len = usize::from(self.land_level_count) + 3;
         if self.level_proportions.len() != expected_len {
             return Err(GenerationError::InvalidParams {
@@ -236,7 +583,6 @@ impl TectonicsParams {
                 ),
             });
         }
-
         let mut sum = 0.0_f32;
         for (i, &p) in self.level_proportions.iter().enumerate() {
             if !p.is_finite() || p < 0.0 {
@@ -254,7 +600,123 @@ impl TectonicsParams {
                 ),
             });
         }
+        Ok(())
+    }
 
+    fn validate_motion_and_minerals(&self) -> Result<(), GenerationError> {
+        if !self.motion_magnitude_min.is_finite() || self.motion_magnitude_min <= 0.0 {
+            return Err(GenerationError::InvalidParams {
+                reason: format!(
+                    "motion_magnitude_min {} must be finite and > 0.0",
+                    self.motion_magnitude_min
+                ),
+            });
+        }
+        if !self.motion_magnitude_max.is_finite()
+            || self.motion_magnitude_max < self.motion_magnitude_min
+        {
+            return Err(GenerationError::InvalidParams {
+                reason: format!(
+                    "motion_magnitude_max {} must be finite and \
+                     >= motion_magnitude_min {}",
+                    self.motion_magnitude_max, self.motion_magnitude_min
+                ),
+            });
+        }
+        let expected_weights = MineralCharacter::ALL.len();
+        if self.mineral_weights.len() != expected_weights {
+            return Err(GenerationError::InvalidParams {
+                reason: format!(
+                    "mineral_weights has {} entries; expected {} \
+                     (one per MineralCharacter variant)",
+                    self.mineral_weights.len(),
+                    expected_weights
+                ),
+            });
+        }
+        let weight_sum: f32 = self.mineral_weights.iter().sum();
+        for (i, &w) in self.mineral_weights.iter().enumerate() {
+            if !w.is_finite() || w < 0.0 {
+                return Err(GenerationError::InvalidParams {
+                    reason: format!("mineral_weights[{i}] = {w} is negative or non-finite"),
+                });
+            }
+        }
+        if weight_sum <= 0.0 {
+            return Err(GenerationError::InvalidParams {
+                reason: "mineral_weights must have at least one entry > 0.0".to_owned(),
+            });
+        }
+        Ok(())
+    }
+
+    fn validate_elevation_and_hill_params(&self) -> Result<(), GenerationError> {
+        if !self.convergence_threshold.is_finite() || self.convergence_threshold < 0.0 {
+            return Err(GenerationError::InvalidParams {
+                reason: format!(
+                    "convergence_threshold {} must be finite and >= 0.0",
+                    self.convergence_threshold
+                ),
+            });
+        }
+        for (name, value) in [
+            (
+                "continental_base_elevation",
+                self.continental_base_elevation,
+            ),
+            ("oceanic_base_elevation", self.oceanic_base_elevation),
+            ("mountain_elevation_boost", self.mountain_elevation_boost),
+            ("coastal_mountain_boost", self.coastal_mountain_boost),
+            ("subduction_trench_penalty", self.subduction_trench_penalty),
+            ("island_arc_boost", self.island_arc_boost),
+            ("rift_valley_penalty", self.rift_valley_penalty),
+            ("mid_ocean_ridge_boost", self.mid_ocean_ridge_boost),
+            ("detail_noise_amplitude", self.detail_noise_amplitude),
+            (
+                "hill_near_boundary_threshold",
+                self.hill_near_boundary_threshold,
+            ),
+            ("hill_interior_threshold", self.hill_interior_threshold),
+        ] {
+            if !value.is_finite() {
+                return Err(GenerationError::InvalidParams {
+                    reason: format!("{name} = {value} is not finite"),
+                });
+            }
+        }
+        if !self.intra_plate_noise_amplitude.is_finite() || self.intra_plate_noise_amplitude < 0.0 {
+            return Err(GenerationError::InvalidParams {
+                reason: format!(
+                    "intra_plate_noise_amplitude {} must be finite and >= 0.0",
+                    self.intra_plate_noise_amplitude
+                ),
+            });
+        }
+        for (name, value) in [
+            (
+                "intra_plate_noise_frequency",
+                self.intra_plate_noise_frequency,
+            ),
+            ("boundary_falloff_sigma", self.boundary_falloff_sigma),
+            ("detail_noise_frequency", self.detail_noise_frequency),
+            ("hill_noise_frequency", self.hill_noise_frequency),
+        ] {
+            if !value.is_finite() || value <= 0.0 {
+                return Err(GenerationError::InvalidParams {
+                    reason: format!("{name} = {value} must be finite and > 0.0"),
+                });
+            }
+        }
+        if !(MIN_DETAIL_NOISE_OCTAVES..=MAX_DETAIL_NOISE_OCTAVES)
+            .contains(&self.detail_noise_octaves)
+        {
+            return Err(GenerationError::InvalidParams {
+                reason: format!(
+                    "detail_noise_octaves {} outside [{}, {}]",
+                    self.detail_noise_octaves, MIN_DETAIL_NOISE_OCTAVES, MAX_DETAIL_NOISE_OCTAVES
+                ),
+            });
+        }
         Ok(())
     }
 
@@ -474,6 +936,118 @@ mod tests {
                 ..TectonicsParams::defaults()
             };
             params.validate().expect("max amplitude must validate");
+        }
+    }
+
+    // ------------- motion magnitude -------------
+
+    mod motion_magnitude {
+        use super::*;
+
+        #[test]
+        fn rejects_zero_min() {
+            let params = TectonicsParams {
+                motion_magnitude_min: 0.0,
+                ..TectonicsParams::defaults()
+            };
+            assert!(matches!(
+                params.validate(),
+                Err(GenerationError::InvalidParams { .. })
+            ));
+        }
+
+        #[test]
+        fn rejects_negative_min() {
+            let params = TectonicsParams {
+                motion_magnitude_min: -0.1,
+                ..TectonicsParams::defaults()
+            };
+            assert!(matches!(
+                params.validate(),
+                Err(GenerationError::InvalidParams { .. })
+            ));
+        }
+
+        #[test]
+        fn rejects_max_below_min() {
+            let params = TectonicsParams {
+                motion_magnitude_min: 1.0,
+                motion_magnitude_max: 0.5,
+                ..TectonicsParams::defaults()
+            };
+            assert!(matches!(
+                params.validate(),
+                Err(GenerationError::InvalidParams { .. })
+            ));
+        }
+
+        #[test]
+        fn accepts_equal_min_max() {
+            // Degenerate but valid: all plates get the same speed.
+            let params = TectonicsParams {
+                motion_magnitude_min: 1.0,
+                motion_magnitude_max: 1.0,
+                ..TectonicsParams::defaults()
+            };
+            params.validate().expect("equal min/max must validate");
+        }
+    }
+
+    // ------------- mineral weights -------------
+
+    mod mineral_weights {
+        use super::*;
+
+        #[test]
+        fn rejects_wrong_length() {
+            let params = TectonicsParams {
+                mineral_weights: vec![1.0, 1.0], // too few
+                ..TectonicsParams::defaults()
+            };
+            assert!(matches!(
+                params.validate(),
+                Err(GenerationError::InvalidParams { .. })
+            ));
+        }
+
+        #[test]
+        fn rejects_all_zero_weights() {
+            let params = TectonicsParams {
+                mineral_weights: vec![0.0; MineralCharacter::ALL.len()],
+                ..TectonicsParams::defaults()
+            };
+            assert!(matches!(
+                params.validate(),
+                Err(GenerationError::InvalidParams { .. })
+            ));
+        }
+
+        #[test]
+        fn rejects_negative_weight() {
+            let mut weights = DEFAULT_MINERAL_WEIGHTS.to_vec();
+            weights[0] = -1.0;
+            let params = TectonicsParams {
+                mineral_weights: weights,
+                ..TectonicsParams::defaults()
+            };
+            assert!(matches!(
+                params.validate(),
+                Err(GenerationError::InvalidParams { .. })
+            ));
+        }
+
+        #[test]
+        fn accepts_single_nonzero_weight() {
+            // Only one type available — valid, just degenerate.
+            let mut weights = vec![0.0; MineralCharacter::ALL.len()];
+            weights[0] = 1.0;
+            let params = TectonicsParams {
+                mineral_weights: weights,
+                ..TectonicsParams::defaults()
+            };
+            params
+                .validate()
+                .expect("single nonzero weight must validate");
         }
     }
 }
