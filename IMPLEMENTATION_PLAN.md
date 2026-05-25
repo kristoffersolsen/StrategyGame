@@ -343,12 +343,17 @@ work is implementation.
 
 The pattern for each sub-stage:
 1. Implement the algorithm per the design doc.
-2. Run `mapdump` over a range of seeds. Look at the PNGs.
-3. Tune parameters until output looks geographically plausible.
-4. Add stage-specific determinism tests.
-5. Lock in defaults, commit, move to next sub-stage.
+2. Add PNG outputs to `tools/mapdump/src/main.rs` and
+   `tools/maptest/src/output.rs`.
+3. Add new scalar params to `set_param` in `tools/maptest/src/sweep.rs`
+   and update `tools/maptest/presets/default.ron`.
+4. Run `maptest run` over seeds 1–8. Look at the PNGs.
+5. Tune parameters using `maptest sweep --param <name> --min ... --max ...`
+   to isolate the effect of each knob.
+6. Add stage-specific determinism tests.
+7. Lock in defaults, commit, move to next sub-stage.
 
-### 3.1 Tectonics and base elevation
+### 3.1 Tectonics and base elevation ✓
 
 Design doc §1.9. Plate generation, boundary classification, base
 elevation, sea level, discrete height levels.
@@ -360,6 +365,11 @@ PNG outputs: plate map (colored Voronoi), continuous elevation
 Tuning targets: visible continental coherence, varied plate sizes,
 no obvious Voronoi straight-line artifacts, sea level threshold
 producing the requested land/water ratio.
+
+Tuning integration: `tools/maptest` crate added alongside this stage
+(`run` + `sweep` subcommands, rayon parallelism, RON presets). 24 scalar
+params in `set_param`. 8 PNG types in `output.rs`. `mapdump` simplified
+to `--params <file.ron>`. ADR-0003 written. **Complete.**
 
 ### 3.2 Climate (temperature + moisture)
 
@@ -375,6 +385,11 @@ stability holds (no numerical blow-up).
 
 This is the most numerically delicate stage. Expect parameter tuning
 to take a while.
+
+Tuning integration: add temperature, moisture, wind, and precipitation
+outputs to `output.rs` and `mapdump`. Add all scalar climate params to
+`set_param`. Key sweeps: moisture advection iteration count, orographic
+precipitation strength, latitude temperature falloff rate.
 
 ### 3.3 Hydrology
 
@@ -394,6 +409,11 @@ produces visible chokepoints without overpopulating.
 transitions that need explicit traversability rules. Recommend
 impassable for canyon walls; cleanest gameplay result.
 
+Tuning integration: add flow accumulation, river, lake, floodplain,
+and canyon outputs to `output.rs` and `mapdump`. Key sweeps: minimum
+flow accumulation to become a river, lake fill depth limit, canyon
+carving threshold.
+
 ### 3.4 Biomes
 
 Design doc §1.12. Whittaker-style lookup from (temperature, moisture)
@@ -407,7 +427,13 @@ unhandled climate combinations producing undefined biomes, hydrology
 overrides produce fertile strips along rivers in desert biomes.
 
 The biome lookup table itself becomes a RON config file at this
-stage (first real use of the RON serialization decision).
+stage (RON serialization was already added in Stage 3.1 for
+`TectonicsParams`; biome table is its first cross-stage use).
+
+Tuning integration: add biome map (categorical colormap) output to
+`output.rs` and `mapdump`. The biome lookup table is in RON — varied
+via the file, not sweepable scalars. If any smoothing or override
+strength params are added, expose them in `set_param`.
 
 ### 3.5 Resource placement
 
@@ -419,6 +445,10 @@ PNG outputs: per-resource maps, combined resource overlay.
 Tuning targets: rarity feels right (not too sparse, not too dense),
 luxuries form characteristic continental monopolies, strategic
 resources have realistic geographic distribution.
+
+Tuning integration: add per-resource density maps and combined overlay
+to `output.rs` and `mapdump`. Key sweeps: luxury cluster radius,
+strategic scatter density, base geological probability weights.
 
 ### 3.6 Starting position selection
 
@@ -435,6 +465,10 @@ without flattening geographic character.
 This is the stage where the determinism scaffold gets a final
 exercise — the full pipeline must produce byte-identical output
 across runs.
+
+Tuning integration: add viability heatmap and selected positions
+overlay to `output.rs` and `mapdump`. Key sweeps: adequacy floor
+score threshold, minimum spacing distance between starts.
 
 ### Gate: Stage 3 complete
 
@@ -565,6 +599,6 @@ If the plan and reality drift, the plan is wrong. Fix it.
 
 ## Status
 
-**Current stage:** Stage 2 complete.
+**Current stage:** Stage 3.1 complete.
 
-**Next action:** Begin stage 3.
+**Next action:** Begin stage 3.2 — Climate.

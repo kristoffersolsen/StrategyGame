@@ -1,7 +1,7 @@
 # Implementation Status
 
 **Date:** 2026-05-25  
-**Stage:** 3.1 Tectonics — **complete** (all 9 steps)  
+**Stage:** 3.1 Tectonics — **complete**  
 **Next action:** Stage 3.2 — Climate (design §1.10)
 
 ---
@@ -10,13 +10,12 @@
 
 This project is a turn-based 2D strategy game inspired by Civilization,
 built in Rust using the Bevy game engine. The codebase is in a Cargo
-workspace with four crates: `coords`, `worldgen`, `game`, and the
-`mapdump` CLI tool. This document covers the state of the `worldgen`
+workspace with four library/game crates (`coords`, `worldgen`, `game`,
+`det_rng`) and two CLI tools (`mapdump`, `maptest`). This document
+covers the state of the `worldgen`
 crate and the generation pipeline only.
 
-Stages 0 (foundations), 1 (coords crate), and 2 (worldgen
-infrastructure) are complete. Stage 3 (the generation pipeline) is in
-progress at sub-stage 3.2 (climate).
+Stages 0–3.1 are complete. Stage 3.2 (climate) is next.
 
 ---
 
@@ -36,68 +35,38 @@ progress at sub-stage 3.2 (climate).
 - ADRs: `0001-infra-determinism-and-rng-threading.md`,
   `0002-worldgen-probabilistic-plate-type-assignment.md`
 
-### Stage 3.1 — Tectonics (complete, all 9 steps)
+### Stage 3.1 — Tectonics (complete)
 
-All implemented in `crates/worldgen/src/stages/tectonics/`.
+All 9 steps in `crates/worldgen/src/stages/tectonics/`.
 
-**Step 1 — Plate seed placement** (`seeds.rs`)  
-Bridson's Poisson disk sampling, wrap-aware via `MapBounds::distance`.
-Radius derived from target plate count and map area via
-`PACKING_EFFICIENCY_FACTOR = 1.4` (empirically calibrated).
-Produces ~9–11 seeds at default target of 10.
-
-**Steps 2–3 — Voronoi partition + boundary perturbation** (`voronoi.rs`,
-`perturbation.rs`)  
-Every tile assigned to nearest seed by hex distance. Boundaries
-perturbed by wrap-aware 3D OpenSimplex noise (q-axis lifted onto torus
-circle for seamless east-west wrapping). `boundary_perturbation_amplitude`
-controls waviness (default 8.0 tiles).
-
-**Step 4 — Plate properties** (`plates.rs`)  
-Each plate assigned:
-- `PlateType` (Continental/Oceanic) — probabilistic from `land_fraction`
-  implied by `level_proportions` (ADR-0002)
-- `MotionVector` — random angle + magnitude in
-  `[motion_magnitude_min, motion_magnitude_max]`
-- `MineralCharacter` — weighted random draw over 5 geological categories
-
-**Step 5 — Boundary classification** (`boundary.rs`)  
-Per-tile boundary type (`None` = interior, `Some(Convergent/Divergent/Transform)`).
-Computed from approach velocity: `dot(motion_A − motion_B, normal_A→B)`.
-`convergence_threshold` separates convergent/divergent from transform.
-Wrap-aware boundary normal using the shorter east-west arc.
-
-**Steps 6–7 — Elevation field** (`elevation.rs`)  
-Continuous `Field<f32>`. Three additive contributions:
-1. Per-plate base (`continental_base_elevation` / `oceanic_base_elevation`)
-2. Intra-plate OpenSimplex noise (low amplitude)
-3. Boundary effects: modifier from `(own type, adj type, boundary type)`
-   lookup, propagated via Gaussian falloff (`boundary_falloff_sigma = 8` tiles).
-Then multi-octave fBm detail noise overlaid uniformly (step 7).
-
-**Step 8 — Sea level + quantile thresholding** (`sea_level.rs`)  
-Elevation field shifted so sea level = 0. Each tile bucketed into a
-`u8` height level by quantile thresholds derived from `level_proportions`.
-Achieved proportions match `level_proportions` exactly by construction.
-
-**Step 9 — Hills classification** (`hills.rs`)  
-Per-tile `bool` hilliness flag. Multi-source BFS from boundary tiles
-produces a distance field; threshold linearly interpolates between
-`hill_near_boundary_threshold` (near boundaries) and
-`hill_interior_threshold` (far interior). Tile is hilly if OpenSimplex
-noise exceeds the interpolated threshold.
-
-**Visual output verified** (via `mapdump` + `scripts/test_seeds.sh`):
-- `31_01_plate_seeds_px.png` — seed scatter, even distribution
-- `31_03_plate_map_px.png` / `hex` — organic plate boundaries
-- `31_05_boundary_types_px.png` — convergent (red) / divergent (blue) / transform (grey)
-- `31_07_elevation_px.png` — continuous elevation field (Viridis)
-- `31_08_height_levels_px.png` / `hex` — discrete 6-band height classification
-- `31_09_hills_px.png` — hilliness overlay (white = hilly)
+- Plate seed placement: Bridson Poisson disk sampling, wrap-aware;
+  `PACKING_EFFICIENCY_FACTOR = 1.4` maps target count to sample radius
+- Voronoi partition + noise-perturbed boundaries: every tile assigned
+  to nearest seed; east-west wrap handled by torus-lifting the q-axis
+  in 3D OpenSimplex noise
+- Plate properties: `PlateType` (Continental/Oceanic, probabilistic per
+  ADR-0002), `MotionVector` (random angle + magnitude), `MineralCharacter`
+  (weighted draw over 5 geological categories)
+- Boundary classification: Convergent/Divergent/Transform from approach
+  velocity dot product; wrap-aware boundary normal
+- Elevation field: per-plate base + intra-plate noise + boundary-effect
+  Gaussian falloff + multi-octave fBm detail noise
+- Sea level + quantile thresholding: elevation shifted to sea level = 0;
+  `u8` height levels matched exactly to `level_proportions` by construction
+- Hills: multi-source BFS distance field from boundary tiles; noise
+  threshold interpolated between `hill_near_boundary_threshold` and
+  `hill_interior_threshold`
+- 8 PNG outputs per (seed, params) pair; 24-knob `TectonicsParams` with
+  full rustdoc; `TectonicsParams` serde-serializable for RON preset files
+- `tools/maptest` crate: `run` subcommand (multi-seed sequential) and
+  `sweep` subcommand (parameter-range × seeds, parallel via `rayon`);
+  `mapdump` simplified to 5 flags + `--params <file.ron>`; colormaps
+  centralized in `worldgen::debug_viz`
+- ADR-0003: parameter tuning infrastructure decision
 
 ---
 
-## Current file structure (worldgen crate)
+## Current file structure
 
 ```
 crates/worldgen/src/
@@ -106,13 +75,15 @@ crates/worldgen/src/
 ├── field.rs
 ├── params.rs                        ← WorldParams, TuningParams, etc.
 ├── params/
-│   └── tectonics.rs                 ← TectonicsParams (all tuning knobs)
+│   └── tectonics.rs                 ← TectonicsParams (24 tuning knobs, serde)
 ├── rng.rs                           ← MasterRng, StageRng, StageId
 ├── world_data.rs                    ← WorldData, TectonicData, Plate,
 │                                      PlateType, MotionVector,
 │                                      MineralCharacter, PlateId,
 │                                      BoundaryType
-├── debug_viz.rs                     ← PNG dump functions and colormaps
+├── debug_viz.rs                     ← PNG renderers + colormaps (Viridis,
+│                                      Categorical, Grayscale, BoundaryCmap,
+│                                      HeightLevelCmap)
 ├── stages.rs
 └── stages/
     └── tectonics.rs                 ← run() entry point (all 9 steps)
@@ -125,6 +96,17 @@ crates/worldgen/src/
         ├── elevation.rs             ← steps 6–7: elevation + detail noise
         ├── sea_level.rs             ← step 8: quantize to height levels
         └── hills.rs                 ← step 9: hilliness classification
+
+tools/mapdump/src/
+└── main.rs                          ← single-seed PNG dump (5 flags + --params)
+
+tools/maptest/
+├── presets/
+│   └── default.ron                  ← reference preset, all TectonicsParams defaults
+└── src/
+    ├── main.rs                      ← run subcommand + shared CLI types
+    ├── output.rs                    ← write_world_outputs, ensure_output_dirs
+    └── sweep.rs                     ← sweep subcommand, set_param, linspace
 ```
 
 ---
@@ -163,40 +145,32 @@ All live in `crates/worldgen/src/params/tectonics.rs`.
 
 ---
 
-## What is next: Stage 3.2 — Climate
+## What is next
 
-Per design doc §1.10 and `IMPLEMENTATION_PLAN.md`:
+**Stage 3.2 — Climate** (design doc §1.10)
 
 - Latitude-based base temperature field
 - Wind field with latitude bands + noise
 - Moisture advection (CFL-stable iterative scheme)
 - Orographic precipitation (rain shadow behind mountains)
 - Output: `Field<f32>` temperature and moisture fields on `WorldData`
+- Add temperature, moisture, wind, precipitation PNG outputs to `output.rs` and `mapdump`
+- Add climate scalar params to `set_param`; key sweeps: advection iterations, orographic strength, latitude falloff
 
 **Blocker before Stage 3.3 (Hydrology):** resolve cliff impassability
 question (design doc §1.4) before implementing canyon walls.
 
 ---
 
-## After Stage 3.1: remaining pipeline stages
-
-Per `IMPLEMENTATION_PLAN.md`:
-
-**Stage 3.2 — Climate** (design doc §1.10)  
-Latitude-based temperature + advection-simulated moisture. Wind field
-with latitude bands + noise. Orographic precipitation (rain shadows
-behind mountains). Most numerically delicate stage — CFL stability
-matters.
+## Remaining pipeline stages
 
 **Stage 3.3 — Hydrology** (design doc §1.11)  
-Flow accumulation, sink resolution, lake detection, river
-identification, floodplain marking, canyon carving.  
-**Blocker:** Resolve cliff impassability question (design doc §1.4)
-before implementing canyon walls.
+Flow accumulation, sink resolution, lake detection, river identification,
+floodplain marking, canyon carving.
 
 **Stage 3.4 — Biomes** (design doc §1.12)  
-Whittaker-style (temperature, moisture) → biome lookup. RON config
-file for biome table (first use of RON in the project).
+Whittaker-style (temperature, moisture) → biome lookup. Biome table as
+RON config file.
 
 **Stage 3.5 — Resource placement** (design doc §1.13)  
 Geological placement using plate mineral character, biome filtering,
@@ -218,8 +192,9 @@ optional audit pass. Final determinism test exercise.
   parameter: test it at low / default / high, confirm the visible
   effect is monotonic and expected. This is the invariant check, not
   an aesthetic tuning pass.
-- **`mapdump` output for every step.** Each step that produces a new
-  field gets a PNG output in `mapdump`. Naming convention:
+- **PNG output for every step.** Each step that produces a new field
+  gets a PNG output in both `mapdump` (single-seed) and
+  `tools/maptest/src/output.rs` (multi-seed / sweep). Naming convention:
   `31_05_boundary_types_px.png`, `31_07_elevation_px.png`, etc.
 - **Wrap-awareness everywhere.** Distance checks, noise evaluation,
   and BFS must all use `MapBounds::distance` or the torus-lifted noise
