@@ -105,7 +105,7 @@ test(coords): add property tests for wrap idempotency
 build(deps): bump bevy to 0.18.1
 ```
 
-Full convention in `DOCUMENTATION_GUIDE.md §6`.
+Full convention in `documents/guides/documentation-guide.md §6`.
 
 **On squash-merge:** PRs are merged to `main` via squash. The squash commit
 message is what goes into `main`'s history — make it a clean Conventional
@@ -120,7 +120,7 @@ Commits subject line, not "squashed commits of branch feat/..."
 4. CI runs automatically. Fix any failures before merging.
 5. Self-approve and squash-merge.
 
-The full self-review checklist is in `PR_CHECKLIST.md`. CI covers
+The full self-review checklist is in `documents/guides/pr-checklist.md`. CI covers
 formatting, linting, tests, and rustdoc — the checklist covers what
 automation cannot.
 
@@ -144,25 +144,25 @@ git commit --no-verify
 
 ## Code style
 
-See `STYLE_GUIDE.md` for the full coding conventions. Key points:
+See `documents/guides/style-guide.md` for the full coding conventions. Key points:
 
 - `rustfmt` enforces formatting — run `cargo fmt` before committing.
 - `clippy` at pedantic level — warnings are errors in CI.
 - `pub(crate)` is the default visibility; `pub` requires justification.
 - No `unsafe` — `unsafe_code = "forbid"` is set workspace-wide.
 - Error handling: `thiserror` in library crates, `anyhow` at application
-  boundaries. See `STYLE_GUIDE.md §8`.
+  boundaries. See `documents/guides/style-guide.md §8`.
 
 ---
 
 ## Documentation
 
-See `DOCUMENTATION_GUIDE.md` for the full documentation conventions. Key points:
+See `documents/guides/documentation-guide.md` for the full documentation conventions. Key points:
 
 - Every `pub` and non-trivial `pub(crate)` item needs rustdoc.
 - Every `.rs` file needs a `//!` module-level doc block.
-- Design decisions go in `docs/design/`. Cross-cutting decisions get an
-  ADR in `docs/adr/`.
+- Design decisions go in `documents/design/`. Cross-cutting decisions get an
+  ADR in `documents/adr/`.
 - Commit messages follow Conventional Commits (enforced by git hook).
 
 ---
@@ -191,17 +191,16 @@ strategy-game/
 │   └── game/               ← Bevy application
 ├── tools/
 │   └── mapdump/            ← CLI for generation debugging
-├── docs/
-│   ├── design/             ← design documents
-│   └── adr/                ← architecture decision records
-├── STYLE_GUIDE.md
-├── DOCUMENTATION_GUIDE.md
-├── PR_CHECKLIST.md
-└── IMPLEMENTATION_PLAN.md
+└── documents/
+    ├── adr/                ← architecture decision records
+    ├── architecture/       ← ARCHITECTURE.md
+    ├── design/             ← design documents
+    ├── guides/             ← STYLE_GUIDE, DOCUMENTATION_GUIDE, PR_CHECKLIST
+    ├── planning/           ← IMPLEMENTATION_PLAN, STATUS
+    └── worldgen/           ← worldgen parameter references
 ```
 
-Full architecture description in `ARCHITECTURE.md` (written after Stage 1
-of the implementation plan, when there is code to describe).
+Full architecture description in `documents/architecture/architecture.md`.
 
 ---
 

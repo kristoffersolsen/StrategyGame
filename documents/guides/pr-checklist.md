@@ -109,9 +109,9 @@ The `missing_errors_doc` lint catches absence, not staleness. If your PR
 adds `InvalidParam` to `GenerationError`, every function that returns
 `GenerationError` needs its `# Errors` checked.
 
-### 6. ARCHITECTURE.md updated if workspace structure changed
+### 6. documents/architecture/architecture.md updated if workspace structure changed
 
-`ARCHITECTURE.md` describes the structure of the codebase. Update it
+`documents/architecture/architecture.md` describes the structure of the codebase. Update it
 when the structure changes:
 - New crate added or removed
 - Major module moved between crates
@@ -125,8 +125,8 @@ internally, a new test was written. These don't change structure.
 ### 8. Cross-references resolve to real files
 
 If this PR adds or changes a reference to:
-- `docs/design/*.md`
-- `docs/adr/NNNN-*.md`
+- `documents/design/*.md`
+- `documents/adr/NNNN-*.md`
 - A specific section in another doc (`§3.2`)
 - A linked rustdoc item (`[GenerationError]`)
 

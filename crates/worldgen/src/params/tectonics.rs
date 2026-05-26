@@ -5,7 +5,7 @@
 //! set is declared up front so the layout is stable across the steps,
 //! even though the early steps only consume a few of the fields.
 //!
-//! See `IMPLEMENTATION_PLAN.md` §3.1 for the step-by-step rollout.
+//! See `documents/planning/implementation-plan.md` §3.1 for the step-by-step rollout.
 
 use crate::error::GenerationError;
 use crate::world_data::MineralCharacter;

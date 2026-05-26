@@ -430,12 +430,12 @@ sections:
 The README is **not** the design doc. Keep it short. Link to the design
 docs for depth.
 
-### 5.2 ARCHITECTURE.md (required, repo root)
+### 5.2 architecture.md (documents/architecture/architecture.md)
 
-`ARCHITECTURE.md` describes the **structure** of the codebase: how crates
-relate, where major systems live, what the entry points are. The intent
-is that a new contributor — or future-you returning after months away —
-can read it in 10 minutes and know where to look for things.
+`documents/architecture/architecture.md` describes the **structure** of the
+codebase: how crates relate, where major systems live, what the entry points
+are. The intent is that a new contributor — or future-you returning after
+months away — can read it in 10 minutes and know where to look for things.
 
 Pattern adopted from matklad's
 [ARCHITECTURE.md convention](https://matklad.github.io/2021/02/06/ARCHITECTURE.md.html),
@@ -687,7 +687,7 @@ are **not** "I'll update the docs later" tasks.
 | Add a new feature | rustdoc on the new code, plus relevant design doc if it's a design-level addition |
 | Refactor without behavior change | Usually nothing; rustdoc only if the surface changed |
 | Change a design decision | Design doc updated; ADR written for the reversal |
-| Change workspace structure | `ARCHITECTURE.md` updated |
+| Change workspace structure | `documents/architecture/architecture.md` updated |
 | Change build process | `CONTRIBUTING.md` updated |
 | Make a new cross-cutting decision | New ADR |
 

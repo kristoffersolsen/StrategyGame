@@ -294,7 +294,7 @@ The parameters most worth sweeping first, in priority order:
 - Determinism test extended to cover all four climate fields;
   passes across multiple runs.
 - ADR-0004 and ADR-0005 written and accepted.
-- `IMPLEMENTATION_PLAN.md` updated to mark Stage 3.2 complete and
+- `documents/planning/implementation-plan.md` updated to mark Stage 3.2 complete and
   Stage 3.3 next.
 - Design doc §1.10 updated with any decisions made during
   implementation that were left open in the design phase.

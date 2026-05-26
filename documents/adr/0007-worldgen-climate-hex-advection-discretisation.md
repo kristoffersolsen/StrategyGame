@@ -181,4 +181,4 @@ a clear visual improvement at the tuning stage.
 - `crates/worldgen/src/stages/climate/wind.rs` — `HEX_UNIT_VECTORS` constants
 - `crates/worldgen/src/params/climate.rs` — `CFL_MAX_WIND_AMPLITUDE` constant
 - ADR-0006 — fixed-count iteration (context for the loop structure)
-- STATUS.md §3.2 — mathematical model overview
+- documents/planning/status.md §3.2 — mathematical model overview

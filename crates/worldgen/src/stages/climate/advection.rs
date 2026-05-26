@@ -2,7 +2,7 @@
 //!
 //! Implements one iteration of the donor-cell upwind scheme for
 //! moisture transport on the hex grid. The scheme is described in
-//! ADR-0005 and the `STATUS.md` §3.2 mathematical notes.
+//! ADR-0007 and the `documents/planning/status.md` §3.2 mathematical notes.
 //!
 //! # Algorithm
 //!

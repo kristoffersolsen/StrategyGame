@@ -76,6 +76,6 @@ Git hooks in `.githooks/` (installed by setup script):
 
 ## Implementation status
 
-The project is in **Stage 0** (foundations). `coords` is substantially implemented with full tests. `worldgen` and `game` are stubs. `mapdump` is a stub. See `IMPLEMENTATION_PLAN.md` for the full staged plan (Stages 0–3+ covering worldgen infrastructure, generation pipeline, and game scaffolding).
+The project is in **Stage 0** (foundations). `coords` is substantially implemented with full tests. `worldgen` and `game` are stubs. `mapdump` is a stub. See `documents/planning/implementation-plan.md` for the full staged plan (Stages 0–3+ covering worldgen infrastructure, generation pipeline, and game scaffolding).
 
-Design decisions are in `documents/design/design-decisions.md`. Architecture decisions will live in `docs/adr/` (not yet created).
+Design decisions are in `documents/design/design-decisions.md`. Architecture decisions are in `documents/adr/`.
