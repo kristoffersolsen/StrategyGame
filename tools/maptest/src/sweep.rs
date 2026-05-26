@@ -240,6 +240,7 @@ pub(crate) fn set_param(tuning: &mut TuningParams, name: &str, value: f64) -> Re
         "coastal_moisture_factor" => c.coastal_moisture_factor = value as f32,
         "evapotranspiration_rate" => c.evapotranspiration_rate = value as f32,
         "moisture_cap" => c.moisture_cap = value as f32,
+        "diffusion_rate" => c.diffusion_rate = value as f32,
 
         _ => anyhow::bail!(
             "unknown TuningParams field: `{name}`\n\
@@ -257,7 +258,7 @@ pub(crate) fn set_param(tuning: &mut TuningParams, name: &str, value: f64) -> Re
              iteration_count_factor, iteration_count_min, base_precipitation_rate, \
              max_precipitation_fraction, temp_capacity_offset, temp_capacity_scale, \
              orographic_factor, coastal_moisture_factor, evapotranspiration_rate, \
-             moisture_cap"
+             moisture_cap, diffusion_rate"
         ),
     }
     Ok(())

@@ -169,6 +169,14 @@ const DEFAULT_EVAPOTRANSPIRATION_RATE: f32 = 0.0;
 /// field and make interior land values appear near-zero in visualizations.
 const DEFAULT_MOISTURE_CAP: f32 = f32::MAX;
 
+/// Default isotropic diffusion rate.
+///
+/// Zero by default for backwards compatibility. A value of 0.05–0.2 models
+/// turbulent atmospheric mixing, distributing moisture equally in all six
+/// hex directions independent of wind. This enables North-South moisture
+/// transport that the purely zonal wind field cannot provide.
+const DEFAULT_DIFFUSION_RATE: f32 = 0.0;
+
 // ------------- Parameter struct -------------
 
 /// Tuning parameters for the climate stage (design §1.10).
@@ -312,6 +320,15 @@ pub struct ClimateParams {
     /// Default: `f32::MAX` (disabled).
     pub moisture_cap: f32,
 
+    // ------------- Step 4c: isotropic diffusion -------------
+    /// Fraction of each tile's moisture distributed isotropically per iteration.
+    ///
+    /// Each tile sends `diffusion_rate / 6` of its moisture to each of its six
+    /// neighbours, independent of wind direction. Models turbulent atmospheric
+    /// mixing and enables North-South moisture transport. Must be finite,
+    /// `≥ 0.0`, and `≤ 0.5`. Default: 0.0.
+    pub diffusion_rate: f32,
+
     // ------------- Step 6: iteration count -------------
     /// Multiplier on `map_width` to derive the iteration count.
     ///
@@ -355,6 +372,7 @@ impl ClimateParams {
             coastal_moisture_factor: DEFAULT_COASTAL_MOISTURE_FACTOR,
             evapotranspiration_rate: DEFAULT_EVAPOTRANSPIRATION_RATE,
             moisture_cap: DEFAULT_MOISTURE_CAP,
+            diffusion_rate: DEFAULT_DIFFUSION_RATE,
         }
     }
 
@@ -374,6 +392,7 @@ impl ClimateParams {
     /// - `coastal_moisture_factor < 0.0` or is non-finite,
     /// - `evapotranspiration_rate < 0.0` or is non-finite,
     /// - `moisture_cap` is `≤ 0.0` or non-finite (unless `f32::MAX`),
+    /// - `diffusion_rate` is outside `[0.0, 0.5]` or non-finite,
     /// - `base_precipitation_rate` is outside `[0.0, 1.0]` or non-finite,
     /// - `temp_capacity_offset` is non-finite,
     /// - `temp_capacity_scale <= 0.0` or is non-finite,
@@ -511,6 +530,17 @@ impl ClimateParams {
     }
 
     fn validate_precipitation(&self) -> Result<(), GenerationError> {
+        if !self.diffusion_rate.is_finite()
+            || self.diffusion_rate < 0.0
+            || self.diffusion_rate > 0.5
+        {
+            return Err(GenerationError::InvalidParams {
+                reason: format!(
+                    "diffusion_rate {} must be finite and in [0.0, 0.5]",
+                    self.diffusion_rate
+                ),
+            });
+        }
         if !self.base_precipitation_rate.is_finite()
             || self.base_precipitation_rate < 0.0
             || self.base_precipitation_rate > 1.0

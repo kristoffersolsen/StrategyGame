@@ -13,7 +13,7 @@
 (
     tectonics: (
         // Step 1 — Plate seed placement
-        target_plate_count: 25,
+        target_plate_count: 17,
 
         // Step 3 — Plate properties
         motion_magnitude_min: 0.5,
@@ -21,27 +21,27 @@
         mineral_weights: [4.0, 2.0, 1.0, 3.0, 4.0],
 
         // Step 5 — Boundary classification
-        convergence_threshold: 0.3,
+        convergence_threshold: 0.01,
 
         // Steps 6–7 — Elevation field
-        continental_base_elevation: 0.3,
+        continental_base_elevation: 0.1,
         oceanic_base_elevation: -0.3,
         intra_plate_noise_amplitude: 0.05,
         intra_plate_noise_frequency: 2.0,
-        boundary_falloff_sigma: 8.0,
-        mountain_elevation_boost: 1.2,
-        coastal_mountain_boost: 0.8,
-        subduction_trench_penalty: -0.8,
-        island_arc_boost: 0.4,
-        rift_valley_penalty: -0.4,
+        boundary_falloff_sigma: 1.0,
+        mountain_elevation_boost: 0.4,
+        coastal_mountain_boost: 0.6,
+        subduction_trench_penalty: -0.3,
+        island_arc_boost: 1,
+        rift_valley_penalty: -1,
         mid_ocean_ridge_boost: 0.3,
-        detail_noise_amplitude: 0.08,
-        detail_noise_frequency: 4.0,
-        detail_noise_octaves: 3,
+        detail_noise_amplitude: 3.5,
+        detail_noise_frequency: 8.0, // between 9-13
+        detail_noise_octaves: 6,
 
         // Step 8 — Sea level + quantile thresholding
-        land_level_count: 3,
-        level_proportions: [0.35, 0.05, 0.25, 0.20, 0.10, 0.05],
+        land_level_count: 5,
+        level_proportions: [0.35, 0.05, 0.15, 0.1, 0.15, 0.1, 0.05, 0.05],
 
         // Step 9 — Hills classification
         hill_influence_radius: 8,
@@ -60,7 +60,7 @@
         // Step 1 — Temperature field
         equator_temperature: 1.0,
         pole_temperature: -0.5,
-        elevation_lapse_rate: 0.1,
+        elevation_lapse_rate: 0.2,
         climate_band_offset: 0.0,
 
         // Step 2 — Wind field
@@ -70,25 +70,28 @@
                                     // so 0.5 gives radius≈0.08 (negligible N-S wind), 4.0 gives ≈0.64
 
         // Step 3 — Evaporation + coastal source
-        evaporation_rate: 50.0,
+        evaporation_rate: 1.0,
         evaporation_temp_floor: -0.2,
         evaporation_temp_scale: 0.2,
         coastal_moisture_factor: 1,
-        moisture_cap: 2.0,
+        moisture_cap: 50.0,
 
         // Steps 4–5 — Advection and precipitation
-        base_precipitation_rate: 0.01, // lowered: each tile inland loses base_rate×capacity per iter;
+        base_precipitation_rate: 0.05, // lowered: each tile inland loses base_rate×capacity per iter;
                                         // at 0.04 moisture dies in ~10 tiles, at 0.004 it survives ~100
         temp_capacity_offset: 2,
         temp_capacity_scale: 1.0,
-        orographic_factor: 0.1,     // raised: with low base_rate, mountains must capture the moisture
+        orographic_factor: 0.05,     // raised: with low base_rate, mountains must capture the moisture
         max_precipitation_fraction: 0.8,
 
         // Step 4b — Evapotranspiration (land moisture recycling)
-        evapotranspiration_rate: 0.0,
+        evapotranspiration_rate: 0.01,
+
+        // Step 4c — Isotropic diffusion (N-S moisture transport)
+        diffusion_rate: 0.5,
 
         // Step 6 — Iteration count
         iteration_count_factor: 1.5,
-        iteration_count_min: 300,
+        iteration_count_min: 500,
     ),
 )

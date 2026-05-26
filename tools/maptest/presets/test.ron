@@ -77,6 +77,9 @@
         // Step 4b — Evapotranspiration (land moisture recycling)
         evapotranspiration_rate: 0.1,
 
+        // Step 4c — Isotropic diffusion (N-S moisture transport)
+        diffusion_rate: 0.1,
+
         // Step 6 — Iteration count
         iteration_count_factor: 1.5,
         iteration_count_min: 100,

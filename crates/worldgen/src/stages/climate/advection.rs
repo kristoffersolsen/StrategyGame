@@ -11,13 +11,15 @@
 //! 1. For each of the six hex neighbours, compute the outflow projection:
 //!    `p_k = max(0, dot(wind[tile], unit_k))`.
 //! 2. The total outflow fraction `W = Σ p_k`.
-//! 3. The tile retains fraction `(1 − W)` of its moisture.
-//! 4. Each neighbour receives fraction `p_k` of the tile's moisture.
+//! 3. The tile retains fraction `(1 − W − D)` of its moisture, where
+//!    `D = diffusion_rate`.
+//! 4. Each neighbour receives fraction `(p_k + D/6)` of the tile's moisture
+//!    (wind advection + isotropic diffusion share).
 //! 5. The evaporation source is added to `M_next[tile]`.
 //!
-//! With `|wind| ≤ 0.25` the maximum `W ≤ 0.5` (half the strict CFL
-//! bound), so `(1 − W) ≥ 0.5` and no tile ever loses all its moisture
-//! in one step.
+//! With `|wind| ≤ 0.25` the maximum `W ≤ 0.5`. Adding `D ≤ 0.5`, the
+//! total outflow `W + D ≤ 1.0`. The `.max(0.0)` on the retained fraction
+//! guards against edge-case numerical overshoot.
 //!
 //! # Double buffering
 //!
@@ -107,20 +109,21 @@ pub(crate) fn advection_step(
                 }
             }
 
-            // Retained fraction: what the tile keeps after outflow.
-            // With |wind| ≤ 0.25, total_outflow ≤ 0.5, so retained ≥ 0.5.
-            let retained = m * (1.0 - total_outflow).max(0.0);
+            // Retained fraction: what the tile keeps after wind outflow and diffusion.
+            let retained = m * (1.0 - total_outflow - params.diffusion_rate).max(0.0);
             *moisture_out.get_mut(coord).expect("coord is in bounds") += retained;
 
-            // Distribute outflow to in-bounds neighbours via public API.
+            // Distribute wind-advected flux plus equal diffusion share to each neighbour.
+            let diff_flux = m * params.diffusion_rate / 6.0;
             for (dir, idx) in DIRECTION_UNIT_VEC {
-                if projections[idx] <= 0.0 {
+                let flux = m * projections[idx] + diff_flux;
+                if flux <= 0.0 {
                     continue;
                 }
                 if let Some(neighbour) = bounds.neighbor(coord, dir) {
                     *moisture_out
                         .get_mut(neighbour)
-                        .expect("normalized neighbor is in bounds") += m * projections[idx];
+                        .expect("normalized neighbor is in bounds") += flux;
                 }
                 // Moisture flowing off the north/south edge is lost (poles).
             }

@@ -1,15 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+PARAM=target_plate_count
+
+#PARAM=detail_noise_amplitude
+#PARAM=detail_noise_frequency
+#PARAM=detail_noise_octaves
+
+#PARAM=boundary_falloff_sigma
+
+#PARAM=mountain_elevation_boost
+
 #PARAM=coastal_moisture_factor
 #PARAM=orographic_factor
 #PARAM=base_precipitation_rate
 #PARAM=evapotranspiration_rate
-PARAM=moisture_cap
+#PARAM=moisture_cap
+#PARAM=wind_amplitude
 
-MIN=0.0001
-MAX=0.5
-STEPS=20
+
+
+MIN=5
+MAX=25
+STEPS=10
 SEEDS=6  # run seeds 1..SEEDS
 
 # Base preset: non-swept params come from here. Edit this file to change sweep baselines.
