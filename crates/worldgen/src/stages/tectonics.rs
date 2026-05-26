@@ -2,18 +2,18 @@
 //!
 //! Implements the faked-tectonics pipeline: produce geological-looking
 //! output without simulating geological history. The full stage runs
-//! in nine implementation steps:
+//! in ten implementation steps:
 //!
 //! 1. Plate seed placement (Poisson disk).
-//! 2. Voronoi partition assigning every tile to a plate.
-//! 3. Boundary perturbation (low-frequency noise on the partition).
-//! 4. Plate type / motion / mineral character assignment.
-//! 5. Boundary classification (convergent / divergent / transform).
-//! 6. Base elevation field (plate type + intra-plate noise).
-//! 7. Boundary-effect propagation via distance-field Gaussian falloff.
-//! 8. Detail-noise overlay.
-//! 9. Sea-level threshold and discrete height-level discretisation.
-//! 10. Hills pass.
+//! 2. Organic flood-fill growth from seed tiles → plate territories.
+//! 3. Plate type / motion / mineral character assignment.
+//! 4. Boundary classification (convergent / divergent / transform).
+//! 5. Base elevation field (plate type + intra-plate noise).
+//! 6. Boundary-effect propagation via distance-field Gaussian falloff.
+//! 7. Detail-noise overlay.
+//! 8. Sea-level threshold and discrete height-level discretisation.
+//! 9. Hills pass.
+//! 10. Mountain pass carving.
 //!
 //! Each step's results are populated into [`TectonicData`] (in
 //! [`crate::world_data`]). The entry point [`run`] is called by
@@ -21,12 +21,12 @@
 
 mod boundary;
 mod elevation;
+mod growth;
 mod hills;
-mod perturbation;
+mod mountain_pass;
 mod plates;
 mod sea_level;
 mod seeds;
-pub(crate) mod voronoi;
 
 pub(crate) use seeds::place_plate_seeds;
 
@@ -41,15 +41,16 @@ use crate::world_data::TectonicData;
 /// Runs the tectonics stage end-to-end against the given parameters
 /// and stage-scoped RNG, returning the populated [`TectonicData`].
 ///
-/// All steps 1–9 are run in sequence:
+/// All steps are run in sequence:
 /// - Step 1: plate seed placement (Poisson disk) → `seeds`.
-/// - Steps 2–3: noise-perturbed Voronoi partition → `plate_id`.
-/// - Step 4: plate type, motion vector, mineral character → `plates`.
-/// - Step 5: boundary classification → `boundary_type`.
-/// - Steps 6–7: base elevation + detail noise → `elevation`.
+/// - Step 2: organic flood-fill growth → `plate_id`.
+/// - Step 3: plate type, motion vector, mineral character → `plates`.
+/// - Step 4: boundary classification → `boundary_type`.
+/// - Steps 5–7: base elevation + detail noise → `elevation`.
 /// - Step 8: sea-level correction + height-level discretisation
 ///   → normalised `elevation`, `height_level`.
 /// - Step 9: hills pass → `is_hilly`.
+/// - Step 10: mountain pass carving → updated `height_level`.
 ///
 /// # Errors
 ///
@@ -65,19 +66,13 @@ pub(crate) fn run(
     // Step 1: Poisson-disk plate seed placement.
     let seeds = place_plate_seeds(bounds, params, rng);
 
-    // Steps 2–3: noise-perturbed Voronoi partition.
-    let voronoi_noise_seed: u32 = rng.next_u32();
-    let plate_id = perturbation::assign_plates_perturbed(
-        bounds,
-        &seeds,
-        params.boundary_perturbation_amplitude,
-        voronoi_noise_seed,
-    );
+    // Step 2: organic flood-fill plate growth.
+    let plate_id = growth::grow_plates_organic(bounds, &seeds, rng);
 
-    // Step 4: plate type, motion vector, mineral character.
+    // Step 3: plate type, motion vector, mineral character.
     let plates = plates::assign_plate_properties(seeds.len(), params, rng);
 
-    // Step 5: boundary classification.
+    // Step 4: boundary classification.
     let boundary_type = boundary::classify_boundaries(
         bounds,
         &plate_id,
@@ -86,7 +81,7 @@ pub(crate) fn run(
         params.convergence_threshold,
     );
 
-    // Steps 6–7: base elevation field + detail-noise overlay.
+    // Steps 5–7: base elevation field + detail-noise overlay.
     let intra_noise_seed: u32 = rng.next_u32();
     let detail_noise_seed: u32 = rng.next_u32();
     let mut elevation = elevation::build_elevation_field(
@@ -105,6 +100,11 @@ pub(crate) fn run(
     // Step 9: hills pass.
     let hill_noise_seed: u32 = rng.next_u32();
     let is_hilly = hills::classify_hills(bounds, &boundary_type, params, hill_noise_seed);
+
+    // Step 10: mountain pass carving.
+    let pass_seed: u32 = rng.next_u32();
+    let height_level =
+        mountain_pass::apply_mountain_passes(bounds, &height_level, params, pass_seed);
 
     Ok(TectonicData {
         seeds,

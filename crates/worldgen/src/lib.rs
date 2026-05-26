@@ -58,13 +58,14 @@ mod world_data;
 pub use error::GenerationError;
 pub use field::Field;
 pub use params::{
-    AdvancedParams, BasicParams, ClimateBand, MAX_DETAIL_NOISE_OCTAVES, MAX_LAND_LEVEL_COUNT,
-    MAX_TARGET_PLATE_COUNT, MIN_DETAIL_NOISE_OCTAVES, MIN_LAND_LEVEL_COUNT, MIN_TARGET_PLATE_COUNT,
-    MapArchetype, MapSize, ResourceAbundance, TectonicsParams, TuningParams, WorldAge, WorldParams,
+    AdvancedParams, BasicParams, CFL_MAX_WIND_AMPLITUDE, ClimateBand, ClimateParams,
+    MAX_DETAIL_NOISE_OCTAVES, MAX_LAND_LEVEL_COUNT, MAX_TARGET_PLATE_COUNT,
+    MIN_DETAIL_NOISE_OCTAVES, MIN_LAND_LEVEL_COUNT, MIN_TARGET_PLATE_COUNT, MapArchetype, MapSize,
+    ResourceAbundance, TectonicsParams, TuningParams, WorldAge, WorldParams,
 };
 pub use world_data::{
-    BoundaryType, MineralCharacter, MotionVector, Plate, PlateId, PlateType, TectonicData,
-    WorldData,
+    BoundaryType, ClimateData, MineralCharacter, MotionVector, Plate, PlateId, PlateType,
+    TectonicData, WorldData,
 };
 
 use coords::MapBounds;
@@ -105,6 +106,15 @@ pub fn generate_world(params: &WorldParams) -> Result<WorldData, GenerationError
     // Stage 3.1: tectonics.
     let mut tectonic_rng = master.fork(StageId::Tectonics);
     world.tectonics = stages::tectonics::run(bounds, &params.tuning.tectonics, &mut tectonic_rng)?;
+
+    // Stage 3.2: climate.
+    let mut climate_rng = master.fork(StageId::Climate);
+    world.climate = stages::climate::run(
+        bounds,
+        &world.tectonics,
+        &params.tuning.climate,
+        &mut climate_rng,
+    );
 
     Ok(world)
 }

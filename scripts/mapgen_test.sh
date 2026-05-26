@@ -1,0 +1,1 @@
+cargo run --release --bin maptest -- run --params tools/maptest/presets/default.ron --seeds 3

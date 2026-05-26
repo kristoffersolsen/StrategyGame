@@ -1,6 +1,6 @@
 //! Parameter-range sweep subcommand.
 //!
-//! Varies a single [`TectonicsParams`] scalar field across an evenly-spaced
+//! Varies a single [`TuningParams`] scalar field across an evenly-spaced
 //! range of values, generating the full set of debug images for each
 //! (value, seed) pair. All pairs run in parallel via [`rayon`].
 
@@ -10,17 +10,17 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use rayon::prelude::*;
 use tracing::info;
-use worldgen::{BasicParams, TectonicsParams, WorldParams, generate_world};
+use worldgen::{BasicParams, TuningParams, WorldParams, generate_world};
 
 use crate::output;
 
 // ------------- CLI args -------------
 
-/// Sweep a single `TectonicsParams` field across a range of values.
+/// Sweep a single `TuningParams` field across a range of values.
 #[derive(Debug, Parser)]
 pub(crate) struct SweepArgs {
-    /// `TectonicsParams` field name in `snake_case` to vary.
-    /// Vec fields (`level_proportions`, `mineral_weights`) are not supported.
+    /// Field name in `snake_case` to vary (e.g. `mountain_elevation_boost`,
+    /// `wind_amplitude`). Vec and bool fields are not sweepable.
     #[arg(long)]
     pub(crate) param: String,
 
@@ -40,8 +40,8 @@ pub(crate) struct SweepArgs {
     #[arg(long, num_args(1..), default_values_t = [1u64, 2, 3, 4])]
     pub(crate) seeds: Vec<u64>,
 
-    /// Optional RON file with base `TectonicsParams`. All fields not
-    /// being swept take their values from this file (or defaults).
+    /// Optional RON file with base `TuningParams`. All fields not being
+    /// swept take their values from this file (or defaults).
     #[arg(long)]
     pub(crate) params: Option<PathBuf>,
 
@@ -67,11 +67,11 @@ pub(crate) struct SweepArgs {
 pub(crate) fn run(args: &SweepArgs) -> Result<()> {
     anyhow::ensure!(args.steps >= 2, "--steps must be at least 2");
 
-    let base_tectonics = crate::load_tectonics_params(args.params.as_deref())?;
+    let base_tuning = crate::load_tuning_params(args.params.as_deref())?;
 
     // Validate the param name up front (before any generation work).
     {
-        let mut probe = base_tectonics.clone();
+        let mut probe = base_tuning.clone();
         set_param(&mut probe, &args.param, args.min)?;
     }
 
@@ -108,8 +108,8 @@ pub(crate) fn run(args: &SweepArgs) -> Result<()> {
     tasks
         .par_iter()
         .try_for_each(|&(val, seed)| -> Result<()> {
-            let mut tectonics = base_tectonics.clone();
-            set_param(&mut tectonics, &args.param, val)?;
+            let mut tuning = base_tuning.clone();
+            set_param(&mut tuning, &args.param, val)?;
 
             let mut params = WorldParams {
                 seed,
@@ -119,7 +119,7 @@ pub(crate) fn run(args: &SweepArgs) -> Result<()> {
                 },
                 ..WorldParams::default()
             };
-            params.tuning.tectonics = tectonics;
+            params.tuning = tuning;
 
             let world = generate_world(&params).with_context(|| {
                 format!(
@@ -129,8 +129,15 @@ pub(crate) fn run(args: &SweepArgs) -> Result<()> {
             })?;
 
             let label = format!("v{val:.4}_{seed}");
-            output::write_world_outputs(&world.tectonics, &output_dir, &label, args.hex_size)
-                .with_context(|| format!("image write failed: value={val}, seed={seed}"))
+            output::write_world_outputs(
+                &world.tectonics,
+                &world.climate,
+                &output_dir,
+                &label,
+                args.hex_size,
+                params.tuning.tectonics.land_level_count,
+            )
+            .with_context(|| format!("image write failed: value={val}, seed={seed}"))
         })?;
 
     info!(
@@ -155,29 +162,31 @@ fn linspace(min: f64, max: f64, steps: usize) -> Vec<f64> {
 
 // ------------- Field assignment by name -------------
 
-/// Sets a single scalar field of `t` by its `snake_case` name.
+/// Sets a single scalar field of `tuning` by its `snake_case` name.
 ///
-/// Vec fields (`level_proportions`, `mineral_weights`) cannot be swept
-/// as scalars; provide them via a `--params` config file instead.
+/// Vec and bool fields cannot be swept as scalars; provide them via a
+/// `--params` config file instead.
 ///
 /// # Errors
 ///
-/// Returns an error if `name` is unknown, is a Vec field, or if the
-/// value is out of range for the field's type.
+/// Returns an error if `name` is unknown, is a non-scalar field, or if
+/// the value is out of range for the field's type.
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_precision_loss,
     clippy::cast_sign_loss
 )]
-pub(crate) fn set_param(t: &mut TectonicsParams, name: &str, value: f64) -> Result<()> {
+pub(crate) fn set_param(tuning: &mut TuningParams, name: &str, value: f64) -> Result<()> {
+    let t = &mut tuning.tectonics;
+    let c = &mut tuning.climate;
     match name {
+        // ---------- TectonicsParams ----------
         // Integer fields — round before casting.
         "target_plate_count" => t.target_plate_count = value.round() as u8,
         "land_level_count" => t.land_level_count = value.round() as u8,
         "detail_noise_octaves" => t.detail_noise_octaves = value.round() as u8,
         "hill_influence_radius" => t.hill_influence_radius = value.round() as u32,
         // f32 fields.
-        "boundary_perturbation_amplitude" => t.boundary_perturbation_amplitude = value as f32,
         "motion_magnitude_min" => t.motion_magnitude_min = value as f32,
         "motion_magnitude_max" => t.motion_magnitude_max = value as f32,
         "convergence_threshold" => t.convergence_threshold = value as f32,
@@ -197,21 +206,59 @@ pub(crate) fn set_param(t: &mut TectonicsParams, name: &str, value: f64) -> Resu
         "hill_near_boundary_threshold" => t.hill_near_boundary_threshold = value as f32,
         "hill_interior_threshold" => t.hill_interior_threshold = value as f32,
         "hill_noise_frequency" => t.hill_noise_frequency = value as f32,
+        "mountain_pass_threshold" => t.mountain_pass_threshold = value as f32,
+        "mountain_pass_noise_frequency" => t.mountain_pass_noise_frequency = value as f32,
         // Vec fields — not sweepable as scalars.
         "level_proportions" | "mineral_weights" => anyhow::bail!(
             "`{name}` is a Vec field; set it via --params <file.ron> instead of --param/--range"
         ),
+        "mountain_pass_neighbor_aware" => anyhow::bail!(
+            "`mountain_pass_neighbor_aware` is a bool; set it via --params <file.ron>"
+        ),
+        "mountain_pass_min_mountain_neighbors" => {
+            t.mountain_pass_min_mountain_neighbors = value.round().clamp(0.0, 6.0) as u8;
+        }
+
+        // ---------- ClimateParams ----------
+        "equator_temperature" => c.equator_temperature = value as f32,
+        "pole_temperature" => c.pole_temperature = value as f32,
+        "elevation_lapse_rate" => c.elevation_lapse_rate = value as f32,
+        "climate_band_offset" => c.climate_band_offset = value as f32,
+        "wind_amplitude" => c.wind_amplitude = value as f32,
+        "wind_noise_amplitude" => c.wind_noise_amplitude = value as f32,
+        "wind_noise_frequency" => c.wind_noise_frequency = value as f32,
+        "evaporation_rate" => c.evaporation_rate = value as f32,
+        "evaporation_temp_floor" => c.evaporation_temp_floor = value as f32,
+        "evaporation_temp_scale" => c.evaporation_temp_scale = value as f32,
+        "iteration_count_factor" => c.iteration_count_factor = value as f32,
+        "iteration_count_min" => c.iteration_count_min = value.round() as u32,
+        "base_precipitation_rate" => c.base_precipitation_rate = value as f32,
+        "max_precipitation_fraction" => c.max_precipitation_fraction = value as f32,
+        "temp_capacity_offset" => c.temp_capacity_offset = value as f32,
+        "temp_capacity_scale" => c.temp_capacity_scale = value as f32,
+        "orographic_factor" => c.orographic_factor = value as f32,
+        "coastal_moisture_factor" => c.coastal_moisture_factor = value as f32,
+        "evapotranspiration_rate" => c.evapotranspiration_rate = value as f32,
+        "moisture_cap" => c.moisture_cap = value as f32,
+        "diffusion_rate" => c.diffusion_rate = value as f32,
+
         _ => anyhow::bail!(
-            "unknown TectonicsParams field: `{name}`\n\
-             Sweepable fields: target_plate_count, boundary_perturbation_amplitude, \
-             motion_magnitude_min, motion_magnitude_max, convergence_threshold, \
-             continental_base_elevation, oceanic_base_elevation, \
-             intra_plate_noise_amplitude, intra_plate_noise_frequency, \
-             boundary_falloff_sigma, mountain_elevation_boost, coastal_mountain_boost, \
-             subduction_trench_penalty, island_arc_boost, rift_valley_penalty, \
-             mid_ocean_ridge_boost, detail_noise_amplitude, detail_noise_frequency, \
-             detail_noise_octaves, hill_influence_radius, hill_near_boundary_threshold, \
-             hill_interior_threshold, hill_noise_frequency"
+            "unknown TuningParams field: `{name}`\n\
+             Tectonics: target_plate_count, motion_magnitude_min, motion_magnitude_max, \
+             convergence_threshold, continental_base_elevation, oceanic_base_elevation, \
+             intra_plate_noise_amplitude, intra_plate_noise_frequency, boundary_falloff_sigma, \
+             mountain_elevation_boost, coastal_mountain_boost, subduction_trench_penalty, \
+             island_arc_boost, rift_valley_penalty, mid_ocean_ridge_boost, \
+             detail_noise_amplitude, detail_noise_frequency, detail_noise_octaves, \
+             hill_influence_radius, hill_near_boundary_threshold, hill_interior_threshold, \
+             hill_noise_frequency, mountain_pass_threshold, mountain_pass_noise_frequency\n\
+             Climate: equator_temperature, pole_temperature, elevation_lapse_rate, \
+             climate_band_offset, wind_amplitude, wind_noise_amplitude, wind_noise_frequency, \
+             evaporation_rate, evaporation_temp_floor, evaporation_temp_scale, \
+             iteration_count_factor, iteration_count_min, base_precipitation_rate, \
+             max_precipitation_fraction, temp_capacity_offset, temp_capacity_scale, \
+             orographic_factor, coastal_moisture_factor, evapotranspiration_rate, \
+             moisture_cap, diffusion_rate"
         ),
     }
     Ok(())

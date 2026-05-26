@@ -169,6 +169,14 @@ impl<T> Field<T> {
         self.data.iter_mut()
     }
 
+    /// Sets every element to `value`, reusing the existing allocation.
+    pub fn fill(&mut self, value: T)
+    where
+        T: Clone,
+    {
+        self.data.fill(value);
+    }
+
     /// Returns the underlying contiguous slice in row-major order.
     ///
     /// Exposed for callers that need to feed the field directly into a

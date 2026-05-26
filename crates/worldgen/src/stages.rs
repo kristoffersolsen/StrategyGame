@@ -8,4 +8,5 @@
 //! Stages are added to this module as they are implemented; see
 //! `IMPLEMENTATION_PLAN.md` §3.
 
+pub(crate) mod climate;
 pub(crate) mod tectonics;

@@ -1,0 +1,87 @@
+// Test preset — many small plates, high noise for stress-testing.
+// Pass it to maptest or mapdump with --params <file>.
+(
+    tectonics: (
+        // Step 1 — Plate seed placement
+        target_plate_count: 20,
+
+        // Step 3 — Plate properties
+        motion_magnitude_min: 0.5,
+        motion_magnitude_max: 1.5,
+        mineral_weights: [4.0, 2.0, 1.0, 3.0, 4.0],
+
+        // Step 5 — Boundary classification
+        convergence_threshold: 0.3,
+
+        // Steps 6–7 — Elevation field
+        continental_base_elevation: 0.3,
+        oceanic_base_elevation: -0.3,
+        intra_plate_noise_amplitude: 0.2,
+        intra_plate_noise_frequency: 2.0,
+        boundary_falloff_sigma: 2.0, // how wide mountain ranges become from the plate borders
+        mountain_elevation_boost: 0.3,
+        coastal_mountain_boost: 0.1,
+        subduction_trench_penalty: -0.8,
+        island_arc_boost: 0.4,
+        rift_valley_penalty: -1.0,
+        mid_ocean_ridge_boost: 0.3,
+        detail_noise_amplitude: 0.5,
+        detail_noise_frequency: 20.0,
+        detail_noise_octaves: 3,
+
+        // Step 8 — Sea level + quantile thresholding
+        land_level_count: 3,
+        level_proportions: [0.35, 0.10, 0.22, 0.18, 0.09, 0.06],
+
+        // Step 9 — Hills classification
+        hill_influence_radius: 8,
+        hill_near_boundary_threshold: -0.2,
+        hill_interior_threshold: 0.55,
+        hill_noise_frequency: 5.0,
+
+        // Step 10 — Mountain pass carving
+        // neighbor_aware disabled: sigma=2.0 + high detail noise produce scattered
+        // mountain tiles rather than coherent bands, so interior tiles with 3+ mountain
+        // neighbors never appear. Set neighbor_aware: true once sigma is ≥ 6.
+        mountain_pass_threshold: 0.1,
+        mountain_pass_noise_frequency: 10.0,
+        mountain_pass_neighbor_aware: false,
+        mountain_pass_min_mountain_neighbors: 3,
+    ),
+    climate: (
+        // Step 1 — Temperature field
+        equator_temperature: 1.0,
+        pole_temperature: -0.5,
+        elevation_lapse_rate: 0.25,
+        climate_band_offset: 0.0,
+
+        // Step 2 — Wind field
+        wind_amplitude: 0.18,       // CFL cap is 0.25
+        wind_noise_amplitude: 0.04,
+        wind_noise_frequency: 0.5,
+
+        // Step 3 — Evaporation + coastal source
+        evaporation_rate: 0.05,
+        evaporation_temp_floor: -1.0,  // lowered from -0.2 so polar oceans contribute
+        evaporation_temp_scale: 1.0,
+        coastal_moisture_factor: 0.03, // direct moisture per adjacent water tile per iteration
+        moisture_cap: 1.0,
+
+        // Steps 4–5 — Advection and precipitation
+        base_precipitation_rate: 0.8,
+        temp_capacity_offset: 0.5,
+        temp_capacity_scale: 4.0,
+        orographic_factor: 1.5,
+        max_precipitation_fraction: 0.6,
+
+        // Step 4b — Evapotranspiration (land moisture recycling)
+        evapotranspiration_rate: 0.1,
+
+        // Step 4c — Isotropic diffusion (N-S moisture transport)
+        diffusion_rate: 0.1,
+
+        // Step 6 — Iteration count
+        iteration_count_factor: 1.5,
+        iteration_count_min: 100,
+    ),
+)

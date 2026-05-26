@@ -226,6 +226,60 @@ impl TectonicData {
     }
 }
 
+// ------------- Climate sub-structure -------------
+
+/// Data produced by the climate stage (Stage 3.2, design §1.10).
+///
+/// All four fields are populated in a single pass by the climate entry
+/// point after the advection loop converges. The precipitation field
+/// is accumulated across all advection iterations.
+#[derive(Debug, Clone)]
+pub struct ClimateData {
+    /// Per-tile normalised temperature.
+    ///
+    /// Derived from latitude and elevation in step 1. Values are
+    /// dimensionless with range roughly `[pole_temperature,
+    /// equator_temperature]` (typically `[−0.5, 1.0]` at defaults).
+    pub temperature: Field<f32>,
+
+    /// Per-tile steady-state moisture content.
+    ///
+    /// Populated by the advection loop (steps 4–6). Values are
+    /// dimensionless; the scale reflects accumulated evaporation
+    /// minus precipitation over all iterations.
+    pub moisture: Field<f32>,
+
+    /// Per-tile 2D wind velocity.
+    ///
+    /// Stored as `[east_component, south_component]` in the hex
+    /// Cartesian frame (see ADR-0005 for the frame definition).
+    /// Magnitudes are bounded by the CFL cap.
+    pub wind: Field<[f32; 2]>,
+
+    /// Per-tile accumulated precipitation over all iterations.
+    ///
+    /// Summed across every advection iteration. Not normalised per
+    /// iteration, so absolute values depend on `iteration_count`.
+    /// Used for biome assignments and rain-shadow visualisation.
+    pub precipitation: Field<f32>,
+}
+
+impl ClimateData {
+    /// Constructs an empty [`ClimateData`] for the given map bounds.
+    ///
+    /// All fields are zero-initialised. Real values are filled in by
+    /// the climate stage.
+    #[must_use]
+    pub fn empty(bounds: MapBounds) -> Self {
+        Self {
+            temperature: Field::filled(bounds, 0.0),
+            moisture: Field::filled(bounds, 0.0),
+            wind: Field::filled(bounds, [0.0, 0.0]),
+            precipitation: Field::filled(bounds, 0.0),
+        }
+    }
+}
+
 // ------------- Top-level output -------------
 
 /// The finalized output of the generation pipeline, consumed by the
@@ -234,7 +288,7 @@ impl TectonicData {
 /// Each Stage 3 sub-stage extends this type with a new field:
 ///
 /// - Stage 3.1 (tectonics) → [`TectonicData`]
-/// - Stage 3.2 (climate) → `ClimateData` (not yet added)
+/// - Stage 3.2 (climate) → [`ClimateData`]
 /// - Stage 3.3 (hydrology) → `HydrologyData` (not yet added)
 /// - Stage 3.4 (biomes) → `BiomeData` (not yet added)
 /// - Stage 3.5 (resources) → `ResourceData` (not yet added)
@@ -250,6 +304,9 @@ pub struct WorldData {
 
     /// Output of the tectonics stage (design §1.9).
     pub tectonics: TectonicData,
+
+    /// Output of the climate stage (design §1.10).
+    pub climate: ClimateData,
 }
 
 impl WorldData {
@@ -260,6 +317,7 @@ impl WorldData {
         Self {
             bounds,
             tectonics: TectonicData::empty(bounds),
+            climate: ClimateData::empty(bounds),
         }
     }
 }
