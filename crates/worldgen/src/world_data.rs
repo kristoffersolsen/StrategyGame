@@ -150,7 +150,7 @@ pub struct Plate {
 /// - Step 8: [`Self::height_level`]
 /// - Step 9: [`Self::is_hilly`]
 ///
-/// See `IMPLEMENTATION_PLAN.md` §3.1 for the full step roster.
+/// See `documents/planning/implementation-plan.md` §3.1 for the full step roster.
 #[derive(Debug, Clone)]
 pub struct TectonicData {
     /// Plate seed coordinates produced by Poisson-disk sampling (step 1).
@@ -294,7 +294,7 @@ impl ClimateData {
 /// - Stage 3.5 (resources) → `ResourceData` (not yet added)
 /// - Stage 3.6 (starting positions) → `Vec<Coord>` (not yet added)
 ///
-/// See `IMPLEMENTATION_PLAN.md` §3 for the full list.
+/// See `documents/planning/implementation-plan.md` §3 for the full list.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct WorldData {

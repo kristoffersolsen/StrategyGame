@@ -1,5 +1,5 @@
 <!--
-This template appears in every PR. See PR_CHECKLIST.md for the full
+This template appears in every PR. See documents/guides/pr-checklist.md for the full
 rationale behind each item. CI checks (formatting, linting, tests,
 rustdoc build) are not in this checklist — they're enforced separately.
 -->
@@ -18,7 +18,7 @@ implements or addresses. Delete this section if not applicable. -->
 
 ## Self-review checklist
 
-Each item below is something CI cannot check. See `PR_CHECKLIST.md` for
+Each item below is something CI cannot check. See `documents/guides/pr-checklist.md` for
 why each one matters.
 
 ### Documentation
@@ -33,7 +33,7 @@ why each one matters.
       (summary actually describes what the function does)
 - [ ] **`# Errors` and `# Panics` sections** still accurate after any
       behavior changes
-- [ ] **ARCHITECTURE.md updated** if workspace structure changed
+- [ ] **documents/architecture/architecture.md updated** if workspace structure changed
 - [ ] **Cross-references resolve** to real files / sections / items
 
 

@@ -104,4 +104,4 @@ added complexity.
 - `crates/worldgen/src/stages/climate/iterate.rs` — loop implementation
 - `crates/worldgen/src/params/climate.rs` — `iteration_count` method
 - `tools/maptest/src/sweep.rs` — `iteration_count_factor` sweep arm
-- STATUS.md §3.2 — key sweeps: `iteration_count_factor` 0.8..2.5 × 5 steps
+- documents/planning/status.md §3.2 — key sweeps: `iteration_count_factor` 0.8..2.5 × 5 steps

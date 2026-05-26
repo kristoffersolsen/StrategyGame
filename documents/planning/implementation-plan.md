@@ -93,15 +93,14 @@ index (`docs/adr/README.md`) is created and populated.
   strategy, ADR/design-doc conventions. References the existing style
   and documentation guides.
 - Move existing documents into place:
-  - `STYLE_GUIDE.md` at repo root
-  - `DOCUMENTATION_GUIDE.md` at repo root
-  - `PR_CHECKLIST.md` at repo root
-  - `docs/design/overview.md` (currently `design-decisions.md`,
-    renamed and moved)
+  - `documents/guides/style-guide.md`
+  - `documents/guides/documentation-guide.md`
+  - `documents/guides/pr-checklist.md`
+  - `documents/design/design-decisions.md` (was `design-decisions.md`)
   - `.github/pull_request_template.md` (the PR template)
 
-Note: `ARCHITECTURE.md` is deferred to the end of Stage 1, when there
-is actual architecture to describe.
+Note: `documents/architecture/architecture.md` is deferred to the end
+of Stage 1, when there is actual architecture to describe.
 
 ### 0.4 CI configuration
 
@@ -147,7 +146,7 @@ All of the following must be true:
 - All operational docs exist and link to each other correctly.
 - A trial PR has been opened and merged successfully exercising the
   full workflow.
-- The PR_CHECKLIST.md template is in `.github/` and auto-populates.
+- The `documents/guides/pr-checklist.md` and `.github/pull_request_template.md` exist and auto-populate.
 
 ---
 
@@ -224,7 +223,7 @@ busywork.
 - All tests from §1.4 passing on a clean checkout.
 - Property tests verifying invariants over generated inputs.
 - Full rustdoc on public API.
-- `ARCHITECTURE.md` written now that there's structure to describe.
+- `documents/architecture/architecture.md` written now that there's structure to describe.
 
 ---
 
