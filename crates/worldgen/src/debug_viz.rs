@@ -471,31 +471,47 @@ impl Colormap for BoundaryCmap {
     }
 }
 
-/// Colour map for the six discrete height levels produced by step 8.
+/// Colour map for the discrete height levels produced by step 8.
 ///
-/// Assumes the default `land_level_count = 3` (six levels total).
-/// If that parameter is changed the palette should be extended to
-/// cover the additional levels.
+/// Ocean and coast are fixed colours; land levels are linearly
+/// interpolated from orange to red based on elevation; mountain is a
+/// fixed deep red. The number of land levels is taken from
+/// [`Self::land_level_count`], matching [`crate::params::TectonicsParams::land_level_count`].
 ///
-/// Level → colour:
-/// - `0` ocean      → dark blue  `[15, 55, 120]`
-/// - `1` coast      → light blue `[80, 155, 215]`
-/// - `2` low land   → orange     `[230, 155, 55]`
-/// - `3` mid land   → orange-red `[205, 85, 30]`
-/// - `4` high land  → red        `[175, 40, 20]`
-/// - `5` mountain   → deep red   `[130, 15, 15]`
-pub struct HeightLevelCmap;
+/// Fixed anchors:
+/// - `0` ocean    → dark blue  `[15, 55, 120]`
+/// - `1` coast    → light blue `[80, 155, 215]`
+/// - last level   → mountain   `[130, 15, 15]`
+///
+/// Land levels `2..=land_level_count+1` interpolate orange `[230, 155, 55]`
+/// → red `[175, 40, 20]`.
+pub struct HeightLevelCmap {
+    /// Number of discrete land levels, matching [`crate::params::TectonicsParams::land_level_count`].
+    pub land_level_count: u8,
+}
 
 impl Colormap for HeightLevelCmap {
     fn color(&self, value: f32) -> [u8; 3] {
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        match (value.round() as u8).min(5) {
-            0 => [15, 55, 120],  // ocean      — dark blue
-            1 => [80, 155, 215], // coast      — light blue
-            2 => [230, 155, 55], // low land   — orange
-            3 => [205, 85, 30],  // mid land   — orange-red
-            4 => [175, 40, 20],  // high land  — red
-            _ => [130, 15, 15],  // mountain   — deep red
+        let level = value.round() as u8;
+        let mountain = self.land_level_count + 2;
+        match level {
+            0 => [15, 55, 120],
+            1 => [80, 155, 215],
+            l if l >= mountain => [130, 15, 15],
+            l => {
+                let land_idx = l - 2;
+                let span = f32::from((self.land_level_count - 1).max(1));
+                #[allow(clippy::cast_precision_loss)]
+                let t = f32::from(land_idx) / span;
+                let lerp = |a: u8, b: u8| -> u8 {
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                    {
+                        (f32::from(a) + t * (f32::from(b) - f32::from(a))).round() as u8
+                    }
+                };
+                [lerp(230, 175), lerp(155, 40), lerp(55, 20)]
+            }
         }
     }
 }

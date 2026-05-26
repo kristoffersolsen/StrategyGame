@@ -1,0 +1,48 @@
+// More land levels preset — 5 land levels for richer terrain stratification.
+// Pass it to maptest or mapdump with --params <file>.
+(
+    tectonics: (
+        // Step 1 — Plate seed placement
+        target_plate_count: 25,
+
+        // Step 3 — Plate properties
+        motion_magnitude_min: 0.5,
+        motion_magnitude_max: 1.5,
+        mineral_weights: [4.0, 2.0, 1.0, 3.0, 4.0],
+
+        // Step 5 — Boundary classification
+        convergence_threshold: 0.3,
+
+        // Steps 6–7 — Elevation field
+        continental_base_elevation: 0.3,
+        oceanic_base_elevation: -0.3,
+        intra_plate_noise_amplitude: 0.2,
+        intra_plate_noise_frequency: 2.0,
+        boundary_falloff_sigma: 8.0,
+        mountain_elevation_boost: 0.9,
+        coastal_mountain_boost: 0.8,
+        subduction_trench_penalty: -0.8,
+        island_arc_boost: 0.4,
+        rift_valley_penalty: -1.0,
+        mid_ocean_ridge_boost: 0.3,
+        detail_noise_amplitude: 0.88,
+        detail_noise_frequency: 20.0,
+        detail_noise_octaves: 3,
+
+        // Step 8 — Sea level + quantile thresholding
+        land_level_count: 5,
+        level_proportions: [0.3, 0.1, 0.15, 0.1, 0.1, 0.1, 0.1, 0.05],
+
+        // Step 9 — Hills classification
+        hill_influence_radius: 8,
+        hill_near_boundary_threshold: -0.2,
+        hill_interior_threshold: 0.55,
+        hill_noise_frequency: 5.0,
+
+        // Step 10 — Mountain pass carving
+        mountain_pass_threshold: 0.15,
+        mountain_pass_noise_frequency: 3.0,
+        mountain_pass_neighbor_aware: true,
+        mountain_pass_min_mountain_neighbors: 3,
+    ),
+)

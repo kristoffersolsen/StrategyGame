@@ -12,9 +12,9 @@
 //! mapdump --seed 42 --output /tmp/map-debug/ --size large --hex-size 6
 //! ```
 //!
-//! # Tectonics parameter overrides
+//! # Parameter overrides
 //!
-//! Pass `--params <file.ron>` to load a [`TectonicsParams`] from a RON
+//! Pass `--params <file.ron>` to load a [`TuningParams`] from a RON
 //! file instead of using defaults. Use the `maptest` tool for multi-seed
 //! runs and parameter-range sweeps.
 //!
@@ -30,44 +30,21 @@
 //! - `00_stub_gradient_px.png` — one-pixel-per-tile version of the
 //!   same, used by determinism tests.
 //!
-//! ## Stage 3.1 — Tectonics step 1: plate seed placement
+//! ## Stage 3.1 — Tectonics
 //!
-//! - `31_01_plate_seeds_px.png` — one-pixel-per-tile blank field with
-//!   Poisson-disk plate seeds painted as white markers on a black
-//!   background. Used to verify: seed count near target, even
-//!   distribution, no wrap-seam clustering.
+//! - `31_01_plate_seeds_px.png` — seed placement validation.
+//! - `31_03_plate_map_px.png` / `31_03_plate_map_hex.png` — plate map.
+//! - `31_05_boundary_types_px.png` — convergent/divergent/transform.
+//! - `31_07_elevation_px.png` — normalized elevation field.
+//! - `31_08_height_levels_px.png` / `31_08_height_levels_hex.png` — discrete levels.
+//! - `31_09_hills_px.png` — hilliness field.
 //!
-//! ## Stage 3.1 — Tectonics steps 2–3: plate map
+//! ## Stage 3.2 — Climate
 //!
-//! - `31_03_plate_map_px.png` — one-pixel-per-tile plate-ID field,
-//!   each plate a distinct categorical color. Used to verify: full
-//!   coverage, organic boundaries, no wrap-seam artifact.
-//! - `31_03_plate_map_hex.png` — hex-rasterized version of the same.
-//!   Primary visual for tuning `boundary_perturbation_amplitude`.
-//!
-//! ## Stage 3.1 — Tectonics step 5: boundary classification
-//!
-//! - `31_05_boundary_types_px.png` — one-pixel-per-tile boundary map.
-//!   Interior tiles: black. Convergent: bright red. Divergent: bright
-//!   blue. Transform: grey.
-//!
-//! ## Stage 3.1 — Tectonics steps 6–7: elevation field
-//!
-//! - `31_07_elevation_px.png` — one-pixel-per-tile elevation field,
-//!   normalised to `[0, 1]` for the Viridis colormap. Darker = lower.
-//!   Before sea-level correction (the raw post-detail-noise elevation).
-//!
-//! ## Stage 3.1 — Tectonics step 8: height levels
-//!
-//! - `31_08_height_levels_px.png` — one-pixel-per-tile discrete height
-//!   level (0 = ocean, 1 = coast, 2+ = land, last = mountain). Primary
-//!   visual for tuning `level_proportions`.
-//! - `31_08_height_levels_hex.png` — hex-rasterized version of the same.
-//!
-//! ## Stage 3.1 — Tectonics step 9: hills
-//!
-//! - `31_09_hills_px.png` — one-pixel-per-tile hilliness field.
-//!   White = hilly, black = flat.
+//! - `32_01_temperature_px.png` / `32_01_temperature_hex.png` — temperature field.
+//! - `32_02_wind_px.png` — wind magnitude field.
+//! - `32_06_moisture_px.png` — final steady-state moisture field.
+//! - `32_06_precipitation_px.png` / `32_06_precipitation_hex.png` — total precipitation.
 
 use std::path::Path;
 use std::path::PathBuf;
@@ -76,7 +53,8 @@ use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use tracing::info;
 use worldgen::{
-    BasicParams, BoundaryType, Field, MapSize, TectonicData, TectonicsParams, WorldParams,
+    BasicParams, BoundaryType, ClimateData, Field, MapSize, TectonicData, TuningParams,
+    WorldParams,
     debug_viz::{
         BoundaryCmap, Categorical, Grayscale, HeightLevelCmap, Viridis, dump_field_hex,
         dump_field_pixels, dump_field_with_seed_overlay,
@@ -104,7 +82,7 @@ fn main() -> Result<()> {
         )
     })?;
 
-    let tectonics = load_tectonics_params(args.params.as_deref())?;
+    let tuning = load_tuning_params(args.params.as_deref())?;
 
     let mut params = WorldParams {
         seed: args.seed,
@@ -114,7 +92,7 @@ fn main() -> Result<()> {
         },
         ..WorldParams::default()
     };
-    params.tuning.tectonics = tectonics;
+    params.tuning = tuning;
 
     info!("running generate_world");
     let world = generate_world(&params).context("world generation failed")?;
@@ -134,6 +112,7 @@ fn main() -> Result<()> {
 
     write_tectonics_plates(&world.tectonics, &params, &args.output, args.hex_size)?;
     write_tectonics_elevation_and_levels(&world.tectonics, &params, &args.output, args.hex_size)?;
+    write_climate(&world.climate, &args.output, args.hex_size)?;
 
     info!("done");
     Ok(())
@@ -141,21 +120,21 @@ fn main() -> Result<()> {
 
 // ------------- Parameter loading -------------
 
-fn load_tectonics_params(path: Option<&Path>) -> Result<TectonicsParams> {
+fn load_tuning_params(path: Option<&Path>) -> Result<TuningParams> {
     let Some(p) = path else {
-        return Ok(TectonicsParams::defaults());
+        return Ok(TuningParams::defaults());
     };
     let content = std::fs::read_to_string(p)
         .with_context(|| format!("failed to read params file: {}", p.display()))?;
     ron::from_str(&content).with_context(|| {
         format!(
-            "failed to parse params file as TectonicsParams: {}",
+            "failed to parse params file as TuningParams: {}",
             p.display()
         )
     })
 }
 
-// ------------- Output helpers (one per stage group) -------------
+// ------------- Output helpers (stage 0 and tectonics) -------------
 
 fn write_stage_0(gradient: &Field<f32>, output: &Path, hex_size: u32) -> Result<()> {
     let hex_path = output.join("00_stub_gradient_hex.png");
@@ -325,7 +304,9 @@ fn write_tectonics_elevation_and_levels(
         &tectonics.height_level,
         &levels_px_path,
         f32::from,
-        &HeightLevelCmap,
+        &HeightLevelCmap {
+            land_level_count: params.tuning.tectonics.land_level_count,
+        },
     )
     .with_context(|| format!("failed to write {}", levels_px_path.display()))?;
 
@@ -335,7 +316,9 @@ fn write_tectonics_elevation_and_levels(
         &tectonics.height_level,
         &levels_hex_path,
         f32::from,
-        &HeightLevelCmap,
+        &HeightLevelCmap {
+            land_level_count: params.tuning.tectonics.land_level_count,
+        },
         hex_size,
     )
     .with_context(|| format!("failed to write {}", levels_hex_path.display()))?;
@@ -358,6 +341,123 @@ fn write_tectonics_elevation_and_levels(
         &Grayscale,
     )
     .with_context(|| format!("failed to write {}", hills_path.display()))?;
+
+    Ok(())
+}
+
+// ------------- Output helpers (climate) -------------
+
+fn write_climate(climate: &ClimateData, output: &Path, hex_size: u32) -> Result<()> {
+    // Temperature.
+    let t_min = climate
+        .temperature
+        .iter()
+        .copied()
+        .fold(f32::INFINITY, f32::min);
+    let t_max = climate
+        .temperature
+        .iter()
+        .copied()
+        .fold(f32::NEG_INFINITY, f32::max);
+    let t_range = t_max - t_min;
+    info!(min = t_min, max = t_max, "temperature field stats");
+
+    let temp_to_f32 = move |v: f32| {
+        if t_range > 0.0 {
+            (v - t_min) / t_range
+        } else {
+            0.5
+        }
+    };
+    let temp_px_path = output.join("32_01_temperature_px.png");
+    info!(path = %temp_px_path.display(), "writing temperature pixel PNG");
+    dump_field_pixels(&climate.temperature, &temp_px_path, temp_to_f32, &Viridis)
+        .with_context(|| format!("failed to write {}", temp_px_path.display()))?;
+
+    let temp_hex_path = output.join("32_01_temperature_hex.png");
+    info!(path = %temp_hex_path.display(), hex_size, "writing temperature hex PNG");
+    dump_field_hex(
+        &climate.temperature,
+        &temp_hex_path,
+        temp_to_f32,
+        &Viridis,
+        hex_size,
+    )
+    .with_context(|| format!("failed to write {}", temp_hex_path.display()))?;
+
+    // Wind magnitude.
+    let max_mag = climate
+        .wind
+        .iter()
+        .map(|[wx, wy]| (wx * wx + wy * wy).sqrt())
+        .fold(0.0_f32, f32::max);
+    info!(max_magnitude = max_mag, "wind field stats");
+
+    let wind_px_path = output.join("32_02_wind_px.png");
+    info!(path = %wind_px_path.display(), "writing wind magnitude PNG");
+    dump_field_pixels(
+        &climate.wind,
+        &wind_px_path,
+        move |[wx, wy]: [f32; 2]| {
+            if max_mag > 0.0 {
+                (wx * wx + wy * wy).sqrt() / max_mag
+            } else {
+                0.0
+            }
+        },
+        &Viridis,
+    )
+    .with_context(|| format!("failed to write {}", wind_px_path.display()))?;
+
+    // Moisture.
+    let max_moist = climate.moisture.iter().copied().fold(0.0_f32, f32::max);
+    info!(max = max_moist, "moisture field stats");
+
+    let moist_px_path = output.join("32_06_moisture_px.png");
+    info!(path = %moist_px_path.display(), "writing moisture PNG");
+    dump_field_pixels(
+        &climate.moisture,
+        &moist_px_path,
+        move |v| if max_moist > 0.0 { v / max_moist } else { 0.0 },
+        &Viridis,
+    )
+    .with_context(|| format!("failed to write {}", moist_px_path.display()))?;
+
+    // Precipitation.
+    let max_precip = climate
+        .precipitation
+        .iter()
+        .copied()
+        .fold(0.0_f32, f32::max);
+    info!(max = max_precip, "precipitation field stats");
+
+    let precip_to_f32 = move |v: f32| {
+        if max_precip > 0.0 {
+            v / max_precip
+        } else {
+            0.0
+        }
+    };
+    let precip_px_path = output.join("32_06_precipitation_px.png");
+    info!(path = %precip_px_path.display(), "writing precipitation pixel PNG");
+    dump_field_pixels(
+        &climate.precipitation,
+        &precip_px_path,
+        precip_to_f32,
+        &Viridis,
+    )
+    .with_context(|| format!("failed to write {}", precip_px_path.display()))?;
+
+    let precip_hex_path = output.join("32_06_precipitation_hex.png");
+    info!(path = %precip_hex_path.display(), hex_size, "writing precipitation hex PNG");
+    dump_field_hex(
+        &climate.precipitation,
+        &precip_hex_path,
+        precip_to_f32,
+        &Viridis,
+        hex_size,
+    )
+    .with_context(|| format!("failed to write {}", precip_hex_path.display()))?;
 
     Ok(())
 }
@@ -386,7 +486,7 @@ struct Args {
     #[arg(long, default_value_t = 8)]
     hex_size: u32,
 
-    /// Optional RON file containing a `TectonicsParams` struct to use
+    /// Optional RON file containing a `TuningParams` struct to use
     /// instead of defaults. Use `maptest` for multi-seed runs and sweeps.
     #[arg(long)]
     params: Option<PathBuf>,

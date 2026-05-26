@@ -295,7 +295,7 @@ mod tests {
     use crate::params::TectonicsParams;
     use crate::rng::{MasterRng, StageId};
     use crate::stages::tectonics::{
-        boundary::classify_boundaries, perturbation::assign_plates_perturbed,
+        boundary::classify_boundaries, growth::grow_plates_organic,
         plates::assign_plate_properties, seeds::place_plate_seeds,
     };
 
@@ -305,13 +305,7 @@ mod tests {
         let mut rng = MasterRng::new(seed).fork(StageId::Tectonics);
 
         let seeds = place_plate_seeds(bounds, &params, &mut rng);
-        let noise_seed: u32 = rng.next_u32();
-        let plate_id = assign_plates_perturbed(
-            bounds,
-            &seeds,
-            params.boundary_perturbation_amplitude,
-            noise_seed,
-        );
+        let plate_id = grow_plates_organic(bounds, &seeds, &mut rng);
 
         let plates = assign_plate_properties(seeds.len(), &params, &mut rng);
 

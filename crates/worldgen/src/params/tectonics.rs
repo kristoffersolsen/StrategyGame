@@ -195,25 +195,6 @@ const DEFAULT_HILL_INTERIOR_THRESHOLD: f32 = 0.55;
 /// Default spatial frequency of the hilliness noise field (step 9).
 const DEFAULT_HILL_NOISE_FREQUENCY: f32 = 5.0;
 
-/// Default value for
-/// [`TectonicsParams::boundary_perturbation_amplitude`].
-///
-/// At the default 240×150 map, a displacement of 8 tiles produces
-/// clearly organic boundaries while keeping plate territories
-/// visually coherent. Lower values make boundaries straighter;
-/// higher values can cause slivers and disconnected plate fragments.
-const DEFAULT_BOUNDARY_PERTURBATION_AMPLITUDE: f32 = 8.0;
-
-/// Upper bound on
-/// [`TectonicsParams::boundary_perturbation_amplitude`].
-///
-/// At amplitudes above roughly half the plate spacing, the perturbed
-/// lookup can reach a third plate's territory, causing isolated tile
-/// fragments and disconnected regions. The plate spacing for 10 plates
-/// on a 240×150 map is approximately 34 tiles (the Poisson disk
-/// radius), so the maximum is set conservatively at 20.
-pub(crate) const MAX_BOUNDARY_PERTURBATION_AMPLITUDE: f32 = 20.0;
-
 /// Default minimum magnitude of a plate motion vector.
 ///
 /// Motion vectors are drawn with a magnitude uniformly distributed in
@@ -241,6 +222,30 @@ const DEFAULT_MOTION_MAGNITUDE_MAX: f32 = 1.5;
 /// each), Hydrocarbons are moderately common (3 parts), Precious is
 /// uncommon (2 parts), and Gems are rare (1 part).
 const DEFAULT_MINERAL_WEIGHTS: [f32; 5] = [4.0, 2.0, 1.0, 3.0, 4.0];
+
+/// Default noise threshold for mountain pass demotion (step 10).
+///
+/// Tiles above this threshold (and passing the optional neighbor filter)
+/// are demoted from mountain to high-land. At `0.15`, approximately
+/// 35–40 % of interior mountain tiles become passes. Set above `1.0`
+/// to disable the pass entirely (no `OpenSimplex` sample exceeds `1.0`).
+const DEFAULT_MOUNTAIN_PASS_THRESHOLD: f32 = 0.15;
+
+/// Default spatial frequency for the mountain pass noise field (step 10).
+///
+/// Higher values produce more frequent, shorter gaps; lower values
+/// produce fewer, wider passes. The default of `3.0` gives roughly
+/// 3–5 passes per mountain range on a standard 240×150 map.
+const DEFAULT_MOUNTAIN_PASS_NOISE_FREQUENCY: f32 = 3.0;
+
+/// Default minimum mountain-neighbor count for neighbor-aware pass
+/// carving (step 10).
+///
+/// When `mountain_pass_neighbor_aware` is `true`, a tile must have at
+/// least this many mountain-level neighbors to be eligible for demotion.
+/// Three neighbors (out of six) means the tile is embedded in the range
+/// interior rather than sitting on its edge.
+const DEFAULT_MOUNTAIN_PASS_MIN_MOUNTAIN_NEIGHBORS: u8 = 3;
 
 // ------------- Parameter struct -------------
 
@@ -299,20 +304,7 @@ pub struct TectonicsParams {
     /// distribution.
     pub level_proportions: Vec<f32>,
 
-    /// Maximum displacement (in tiles) applied to each tile's lookup
-    /// position before the nearest-seed search.
-    ///
-    /// The displacement is derived from a low-frequency `OpenSimplex`
-    /// noise field evaluated in 3D wrap-aware space (see
-    /// `stages/tectonics/perturbation.rs`). At `0.0` the partition is
-    /// a straight Voronoi diagram; at the default value the boundaries
-    /// become organic and geographically plausible.
-    ///
-    /// Range: `0.0..=MAX_BOUNDARY_PERTURBATION_AMPLITUDE`.
-    /// Default: 8.0 tiles.
-    pub boundary_perturbation_amplitude: f32,
-
-    /// Minimum magnitude of a plate motion vector (step 4).
+    /// Minimum magnitude of a plate motion vector (step 3).
     ///
     /// Motion vector magnitudes are drawn uniformly from
     /// `[motion_magnitude_min, motion_magnitude_max]`. The scale is
@@ -483,6 +475,41 @@ pub struct TectonicsParams {
     /// Higher values produce smaller, more scattered hill patches.
     /// Must be finite and `> 0.0`. Default: 5.0.
     pub hill_noise_frequency: f32,
+
+    /// Noise threshold for mountain pass demotion (step 10).
+    ///
+    /// After height-level quantization, mountain tiles whose wrap-aware
+    /// `OpenSimplex` noise value exceeds this threshold are demoted to
+    /// high-land, creating traversable passes through ranges.
+    ///
+    /// At `0.0` roughly 50 % of qualifying tiles are demoted; at `0.5`
+    /// roughly 25 %. Set above `1.0` to disable the pass entirely
+    /// (no `OpenSimplex` sample exceeds `1.0`). Must be finite.
+    /// Default: 0.15.
+    pub mountain_pass_threshold: f32,
+
+    /// Spatial frequency multiplier for the mountain pass noise field
+    /// (step 10).
+    ///
+    /// Higher values produce more frequent, shorter gaps; lower values
+    /// produce wider, fewer passes. Must be finite and `> 0.0`. Default: 3.0.
+    pub mountain_pass_noise_frequency: f32,
+
+    /// Whether to restrict pass demotion to range-interior tiles (step 10).
+    ///
+    /// When `true`, a mountain tile is only eligible for demotion if at
+    /// least `mountain_pass_min_mountain_neighbors` of its six neighbors
+    /// are also at mountain level. This ensures passes cut *through* a
+    /// range rather than nibbling its edges. Default: `true`.
+    pub mountain_pass_neighbor_aware: bool,
+
+    /// Minimum mountain-neighbor count for neighbor-aware pass carving
+    /// (step 10).
+    ///
+    /// Only consulted when `mountain_pass_neighbor_aware` is `true`. A
+    /// tile must have at least this many mountain-level neighbors to be
+    /// eligible for demotion. Range: `0`–`6`. Default: 3.
+    pub mountain_pass_min_mountain_neighbors: u8,
 }
 
 impl TectonicsParams {
@@ -497,7 +524,6 @@ impl TectonicsParams {
             target_plate_count: DEFAULT_TARGET_PLATE_COUNT,
             land_level_count: DEFAULT_LAND_LEVEL_COUNT,
             level_proportions: DEFAULT_LEVEL_PROPORTIONS.to_vec(),
-            boundary_perturbation_amplitude: DEFAULT_BOUNDARY_PERTURBATION_AMPLITUDE,
             motion_magnitude_min: DEFAULT_MOTION_MAGNITUDE_MIN,
             motion_magnitude_max: DEFAULT_MOTION_MAGNITUDE_MAX,
             mineral_weights: DEFAULT_MINERAL_WEIGHTS.to_vec(),
@@ -508,6 +534,10 @@ impl TectonicsParams {
             intra_plate_noise_frequency: DEFAULT_INTRA_PLATE_NOISE_FREQUENCY,
             boundary_falloff_sigma: DEFAULT_BOUNDARY_FALLOFF_SIGMA,
             mountain_elevation_boost: DEFAULT_MOUNTAIN_ELEVATION_BOOST,
+            mountain_pass_threshold: DEFAULT_MOUNTAIN_PASS_THRESHOLD,
+            mountain_pass_noise_frequency: DEFAULT_MOUNTAIN_PASS_NOISE_FREQUENCY,
+            mountain_pass_neighbor_aware: true,
+            mountain_pass_min_mountain_neighbors: DEFAULT_MOUNTAIN_PASS_MIN_MOUNTAIN_NEIGHBORS,
             coastal_mountain_boost: DEFAULT_COASTAL_MOUNTAIN_BOOST,
             subduction_trench_penalty: DEFAULT_SUBDUCTION_TRENCH_PENALTY,
             island_arc_boost: DEFAULT_ISLAND_ARC_BOOST,
@@ -551,17 +581,6 @@ impl TectonicsParams {
                 reason: format!(
                     "land_level_count {} outside [{}, {}]",
                     self.land_level_count, MIN_LAND_LEVEL_COUNT, MAX_LAND_LEVEL_COUNT
-                ),
-            });
-        }
-        if !self.boundary_perturbation_amplitude.is_finite()
-            || self.boundary_perturbation_amplitude < 0.0
-            || self.boundary_perturbation_amplitude > MAX_BOUNDARY_PERTURBATION_AMPLITUDE
-        {
-            return Err(GenerationError::InvalidParams {
-                reason: format!(
-                    "boundary_perturbation_amplitude {} is outside [0.0, {}]",
-                    self.boundary_perturbation_amplitude, MAX_BOUNDARY_PERTURBATION_AMPLITUDE
                 ),
             });
         }
@@ -707,6 +726,34 @@ impl TectonicsParams {
                 });
             }
         }
+
+        if !self.mountain_pass_threshold.is_finite() {
+            return Err(GenerationError::InvalidParams {
+                reason: format!(
+                    "mountain_pass_threshold {} must be finite",
+                    self.mountain_pass_threshold
+                ),
+            });
+        }
+        if !self.mountain_pass_noise_frequency.is_finite()
+            || self.mountain_pass_noise_frequency <= 0.0
+        {
+            return Err(GenerationError::InvalidParams {
+                reason: format!(
+                    "mountain_pass_noise_frequency {} must be finite and > 0.0",
+                    self.mountain_pass_noise_frequency
+                ),
+            });
+        }
+        if self.mountain_pass_min_mountain_neighbors > 6 {
+            return Err(GenerationError::InvalidParams {
+                reason: format!(
+                    "mountain_pass_min_mountain_neighbors {} exceeds maximum of 6",
+                    self.mountain_pass_min_mountain_neighbors
+                ),
+            });
+        }
+
         if !(MIN_DETAIL_NOISE_OCTAVES..=MAX_DETAIL_NOISE_OCTAVES)
             .contains(&self.detail_noise_octaves)
         {
@@ -881,64 +928,6 @@ mod tests {
 
     // ------------- boundary_perturbation_amplitude -------------
 
-    mod boundary_perturbation_amplitude {
-        use super::*;
-
-        #[test]
-        fn rejects_negative_amplitude() {
-            let params = TectonicsParams {
-                boundary_perturbation_amplitude: -1.0,
-                ..TectonicsParams::defaults()
-            };
-            assert!(matches!(
-                params.validate(),
-                Err(GenerationError::InvalidParams { .. })
-            ));
-        }
-
-        #[test]
-        fn rejects_amplitude_above_max() {
-            let params = TectonicsParams {
-                boundary_perturbation_amplitude: MAX_BOUNDARY_PERTURBATION_AMPLITUDE + 1.0,
-                ..TectonicsParams::defaults()
-            };
-            assert!(matches!(
-                params.validate(),
-                Err(GenerationError::InvalidParams { .. })
-            ));
-        }
-
-        #[test]
-        fn rejects_nan_amplitude() {
-            let params = TectonicsParams {
-                boundary_perturbation_amplitude: f32::NAN,
-                ..TectonicsParams::defaults()
-            };
-            assert!(matches!(
-                params.validate(),
-                Err(GenerationError::InvalidParams { .. })
-            ));
-        }
-
-        #[test]
-        fn accepts_zero_amplitude() {
-            let params = TectonicsParams {
-                boundary_perturbation_amplitude: 0.0,
-                ..TectonicsParams::defaults()
-            };
-            params.validate().expect("zero amplitude must validate");
-        }
-
-        #[test]
-        fn accepts_max_amplitude() {
-            let params = TectonicsParams {
-                boundary_perturbation_amplitude: MAX_BOUNDARY_PERTURBATION_AMPLITUDE,
-                ..TectonicsParams::defaults()
-            };
-            params.validate().expect("max amplitude must validate");
-        }
-    }
-
     // ------------- motion magnitude -------------
 
     mod motion_magnitude {
@@ -1048,6 +1037,97 @@ mod tests {
             params
                 .validate()
                 .expect("single nonzero weight must validate");
+        }
+    }
+
+    mod mountain_pass_params {
+        use super::*;
+
+        #[test]
+        fn rejects_nan_threshold() {
+            let params = TectonicsParams {
+                mountain_pass_threshold: f32::NAN,
+                ..TectonicsParams::defaults()
+            };
+            assert!(matches!(
+                params.validate(),
+                Err(GenerationError::InvalidParams { .. })
+            ));
+        }
+
+        #[test]
+        fn accepts_threshold_above_one_disables_pass() {
+            // Threshold > 1.0 is valid — it's the "disabled" sentinel.
+            let params = TectonicsParams {
+                mountain_pass_threshold: 1.5,
+                ..TectonicsParams::defaults()
+            };
+            params
+                .validate()
+                .expect("threshold > 1.0 (disabled) must validate");
+        }
+
+        #[test]
+        fn accepts_negative_threshold_demotes_all() {
+            let params = TectonicsParams {
+                mountain_pass_threshold: -0.9,
+                ..TectonicsParams::defaults()
+            };
+            params.validate().expect("negative threshold must validate");
+        }
+
+        #[test]
+        fn rejects_zero_pass_frequency() {
+            let params = TectonicsParams {
+                mountain_pass_noise_frequency: 0.0,
+                ..TectonicsParams::defaults()
+            };
+            assert!(matches!(
+                params.validate(),
+                Err(GenerationError::InvalidParams { .. })
+            ));
+        }
+
+        #[test]
+        fn rejects_nan_pass_frequency() {
+            let params = TectonicsParams {
+                mountain_pass_noise_frequency: f32::NAN,
+                ..TectonicsParams::defaults()
+            };
+            assert!(matches!(
+                params.validate(),
+                Err(GenerationError::InvalidParams { .. })
+            ));
+        }
+
+        #[test]
+        fn rejects_min_neighbors_above_six() {
+            let params = TectonicsParams {
+                mountain_pass_min_mountain_neighbors: 7,
+                ..TectonicsParams::defaults()
+            };
+            assert!(matches!(
+                params.validate(),
+                Err(GenerationError::InvalidParams { .. })
+            ));
+        }
+
+        #[test]
+        fn accepts_min_neighbors_at_six() {
+            let params = TectonicsParams {
+                mountain_pass_min_mountain_neighbors: 6,
+                ..TectonicsParams::defaults()
+            };
+            params.validate().expect("6 neighbors must validate");
+        }
+
+        #[test]
+        fn accepts_min_neighbors_zero() {
+            let params = TectonicsParams {
+                mountain_pass_min_mountain_neighbors: 0,
+                ..TectonicsParams::defaults()
+            };
+            params.validate().expect("0 neighbors must validate");
         }
     }
 }

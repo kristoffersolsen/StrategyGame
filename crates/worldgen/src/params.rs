@@ -20,6 +20,9 @@
 //! that an unconfigured [`WorldParams`] produces a sensible, playable
 //! medium-sized continents map.
 
+mod climate;
+pub use climate::{CFL_MAX_WIND_AMPLITUDE, ClimateParams};
+
 mod tectonics;
 pub use tectonics::{
     MAX_DETAIL_NOISE_OCTAVES, MAX_LAND_LEVEL_COUNT, MAX_TARGET_PLATE_COUNT,
@@ -284,13 +287,17 @@ pub enum ResourceAbundance {
 ///
 /// Per design doc §1.15, setting any field to a non-default value
 /// disables achievements for the resulting game.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub struct TuningParams {
     /// Knobs consumed by the tectonics stage (design §1.9).
+    #[serde(default)]
     pub tectonics: TectonicsParams,
-    // Climate, hydrology, biomes, resources, and starting-position
-    // sub-structs are added when their stages land.
+    /// Knobs consumed by the climate stage (design §1.10).
+    #[serde(default)]
+    pub climate: ClimateParams,
+    // Hydrology, biomes, resources, and starting-position sub-structs
+    // are added when their stages land.
 }
 
 impl TuningParams {
@@ -302,6 +309,7 @@ impl TuningParams {
     pub fn defaults() -> Self {
         Self {
             tectonics: TectonicsParams::defaults(),
+            climate: ClimateParams::defaults(),
         }
     }
 
@@ -313,6 +321,7 @@ impl TuningParams {
     /// `validate` method.
     pub fn validate(&self) -> Result<(), GenerationError> {
         self.tectonics.validate()?;
+        self.climate.validate()?;
         Ok(())
     }
 
@@ -321,7 +330,7 @@ impl TuningParams {
     /// Used by the achievement gate.
     #[must_use]
     pub fn is_all_default(&self) -> bool {
-        self.tectonics.is_all_default()
+        self.tectonics.is_all_default() && self.climate.is_all_default()
     }
 }
 
