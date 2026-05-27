@@ -271,6 +271,7 @@ mod tests {
 
     mod field_assignment {
         use super::*;
+        use crate::params::TectonicsParams;
         use crate::rng::{MasterRng, StageId};
         use crate::stages::tectonics::growth::grow_plates_organic;
 
@@ -289,7 +290,8 @@ mod tests {
         fn interior_tiles_are_none() {
             let (bounds, seeds, plates) = two_plate_setup();
             let mut rng = MasterRng::new(42).fork(StageId::Tectonics);
-            let plate_id = grow_plates_organic(bounds, &seeds, &mut rng);
+            let plate_id =
+                grow_plates_organic(bounds, &seeds, &TectonicsParams::defaults(), &mut rng);
             let bt = classify_boundaries(bounds, &plate_id, &plates, &seeds, 0.3);
 
             // The seed at (10, 15) is deep inside plate 0 — should be interior.
@@ -305,7 +307,8 @@ mod tests {
         fn boundary_tiles_are_some() {
             let (bounds, seeds, plates) = two_plate_setup();
             let mut rng = MasterRng::new(42).fork(StageId::Tectonics);
-            let plate_id = grow_plates_organic(bounds, &seeds, &mut rng);
+            let plate_id =
+                grow_plates_organic(bounds, &seeds, &TectonicsParams::defaults(), &mut rng);
             let bt = classify_boundaries(bounds, &plate_id, &plates, &seeds, 0.3);
 
             // At least one tile on the map must be a boundary tile.
@@ -317,7 +320,8 @@ mod tests {
         fn converging_plates_produce_convergent_boundary() {
             let (bounds, seeds, plates) = two_plate_setup();
             let mut rng = MasterRng::new(42).fork(StageId::Tectonics);
-            let plate_id = grow_plates_organic(bounds, &seeds, &mut rng);
+            let plate_id =
+                grow_plates_organic(bounds, &seeds, &TectonicsParams::defaults(), &mut rng);
             let bt = classify_boundaries(bounds, &plate_id, &plates, &seeds, 0.3);
 
             // The boundary between the two seeds should be convergent
@@ -405,6 +409,7 @@ mod tests {
 
     mod determinism {
         use super::*;
+        use crate::params::TectonicsParams;
         use crate::rng::{MasterRng, StageId};
         use crate::stages::tectonics::growth::grow_plates_organic;
 
@@ -418,7 +423,8 @@ mod tests {
                 make_plate(0.0, -1.0, PlateType::Continental),
             ];
             let mut rng = MasterRng::new(42).fork(StageId::Tectonics);
-            let plate_id = grow_plates_organic(bounds, &seeds, &mut rng);
+            let plate_id =
+                grow_plates_organic(bounds, &seeds, &TectonicsParams::defaults(), &mut rng);
 
             let a = classify_boundaries(bounds, &plate_id, &plates, &seeds, 0.3);
             let b = classify_boundaries(bounds, &plate_id, &plates, &seeds, 0.3);

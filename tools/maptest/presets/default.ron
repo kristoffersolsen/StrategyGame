@@ -19,6 +19,8 @@
         motion_magnitude_min: 0.5,
         motion_magnitude_max: 1.5,
         mineral_weights: [4.0, 2.0, 1.0, 3.0, 4.0],
+        plate_growth_rate_range: 3.0,
+        clumping_index: 0.0,
 
         // Step 5 — Boundary classification
         convergence_threshold: 0.01,
@@ -29,13 +31,17 @@
         intra_plate_noise_amplitude: 0.05,
         intra_plate_noise_frequency: 2.0,
         boundary_falloff_sigma: 1.0,
+        boundary_strength_noise_amplitude: 0.0,
+        boundary_strength_noise_frequency: 3.0,
+        boundary_sigma_noise_amplitude: 0.0,
+        boundary_sigma_noise_frequency: 3.0,
         mountain_elevation_boost: 0.4,
-        coastal_mountain_boost: 0.6,
+        coastal_mountain_boost: 0.2,
         subduction_trench_penalty: -0.3,
-        island_arc_boost: 1,
+        island_arc_boost: 0.1,
         rift_valley_penalty: -1,
         mid_ocean_ridge_boost: 0.3,
-        detail_noise_amplitude: 3.5,
+        detail_noise_amplitude: 1.2, // around 3.5
         detail_noise_frequency: 8.0, // between 9-13
         detail_noise_octaves: 6,
 
@@ -108,5 +114,20 @@
         // Step 7 — Canyon carving
         canyon_flow_slope_threshold: 0.25,
         canyon_depth: 1,
+    ),
+    biomes: (
+        // Step 2 — Table dimensions. These must match assets/worldgen/biome_table.ron.
+        temperature_bin_count: 8,
+        moisture_bin_count: 8,
+
+        // Step 4 — River, floodplain, and lake-adjacent fertile overrides
+        hydrology_override_strength: 0.8,
+
+        // Step 5 — Optional single-tile-island smoothing
+        smoothing_passes: 0,
+
+        // Step 6 — Forest density feature noise
+        forest_noise_frequency: 0.4,
+        forest_noise_amplitude: 0.6,
     ),
 )

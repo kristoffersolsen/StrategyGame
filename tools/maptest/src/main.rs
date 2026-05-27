@@ -133,9 +133,7 @@ fn run(args: &RunArgs) -> Result<()> {
 
         let label = format!("seed_{seed}");
         output::write_world_outputs(
-            &world.tectonics,
-            &world.climate,
-            &world.hydrology,
+            &world,
             &args.output,
             &label,
             args.hex_size,

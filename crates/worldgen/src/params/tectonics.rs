@@ -120,6 +120,26 @@ const DEFAULT_INTRA_PLATE_NOISE_FREQUENCY: f32 = 2.0;
 /// the effect is ~61 % of peak at 1σ and ~1 % at 3σ (24 tiles).
 const DEFAULT_BOUNDARY_FALLOFF_SIGMA: f32 = 8.0;
 
+/// Default amplitude for coherent source-strength noise on tectonic
+/// boundary effects.
+///
+/// `0.0` disables the noise and preserves the original uniform
+/// boundary contribution.
+const DEFAULT_BOUNDARY_STRENGTH_NOISE_AMPLITUDE: f32 = 0.0;
+
+/// Default spatial frequency for boundary source-strength noise.
+const DEFAULT_BOUNDARY_STRENGTH_NOISE_FREQUENCY: f32 = 3.0;
+
+/// Default amplitude for coherent local-sigma noise on tectonic
+/// boundary effects.
+///
+/// `0.0` disables the noise and preserves the original uniform
+/// boundary falloff width.
+const DEFAULT_BOUNDARY_SIGMA_NOISE_AMPLITUDE: f32 = 0.0;
+
+/// Default spatial frequency for boundary local-sigma noise.
+const DEFAULT_BOUNDARY_SIGMA_NOISE_FREQUENCY: f32 = 3.0;
+
 /// Default elevation boost for continental–continental convergent
 /// boundaries (step 6). Produces high mountain ranges.
 const DEFAULT_MOUNTAIN_ELEVATION_BOOST: f32 = 1.2;
@@ -222,6 +242,18 @@ const DEFAULT_MOTION_MAGNITUDE_MAX: f32 = 1.5;
 /// each), Hydrocarbons are moderately common (3 parts), Precious is
 /// uncommon (2 parts), and Gems are rare (1 part).
 const DEFAULT_MINERAL_WEIGHTS: [f32; 5] = [4.0, 2.0, 1.0, 3.0, 4.0];
+
+/// Default maximum multiplier for per-plate growth-rate variance.
+///
+/// `1.0` disables variance and preserves the original one-tile-per-round
+/// organic growth behavior.
+const DEFAULT_PLATE_GROWTH_RATE_RANGE: f32 = 1.0;
+
+/// Default plate-type clumping strength.
+///
+/// `0.0` disables clumping and preserves the original independent
+/// continental/oceanic plate-type assignment.
+const DEFAULT_CLUMPING_INDEX: f32 = 0.0;
 
 /// Default noise threshold for mountain pass demotion (step 10).
 ///
@@ -339,6 +371,25 @@ pub struct TectonicsParams {
     /// Industrial 4 — Gems rare, Precious uncommon, others common.
     pub mineral_weights: Vec<f32>,
 
+    /// Maximum multiplier for per-plate organic growth rates (step 2).
+    ///
+    /// `1.0` means every plate grows at the original rate of one tile
+    /// per growth round. Values above `1.0` sample each plate's growth
+    /// rate uniformly from `[1 / plate_growth_rate_range,
+    /// plate_growth_rate_range]`, creating varied plate sizes while
+    /// keeping the average centered near the original behavior.
+    ///
+    /// Must be finite and `≥ 1.0`. Default: 1.0.
+    pub plate_growth_rate_range: f32,
+
+    /// Strength of continental/oceanic plate-type clumping (step 3).
+    ///
+    /// `0.0` leaves plate types independently sampled. Values toward
+    /// `1.0` make plates more likely to adopt the majority type of
+    /// adjacent plates, producing larger continental and oceanic
+    /// clusters. Must be finite and in `[0.0, 1.0]`. Default: 0.0.
+    pub clumping_index: f32,
+
     // ------------- Step 5: boundary classification -------------
     /// Minimum absolute approach velocity to classify as convergent or
     /// divergent (rather than transform) in step 5.
@@ -385,6 +436,36 @@ pub struct TectonicsParams {
     /// Effects fall to ~1 % of peak at 3σ. Must be finite and `> 0.0`.
     /// Default: 8.0 tiles.
     pub boundary_falloff_sigma: f32,
+
+    /// Amplitude of coherent per-boundary-source strength noise (step 6).
+    ///
+    /// The source modifier is multiplied by a smooth noise-derived scale,
+    /// creating gaps and chains along tectonic boundaries before height
+    /// quantization. `0.0` disables the effect; `1.0` allows the weakest
+    /// sources to fade almost completely. Must be finite and in
+    /// `[0.0, 1.0]`. Default: 0.0.
+    pub boundary_strength_noise_amplitude: f32,
+
+    /// Spatial frequency multiplier for boundary source-strength noise
+    /// (step 6).
+    ///
+    /// Higher values produce shorter, more frequent breaks in ranges.
+    /// Must be finite and `> 0.0`. Default: 3.0.
+    pub boundary_strength_noise_frequency: f32,
+
+    /// Amplitude of coherent per-boundary-source sigma noise (step 6).
+    ///
+    /// The Gaussian falloff sigma is locally scaled by this noise,
+    /// making some boundary sections narrow and sharp while others are
+    /// broad and diffuse. `0.0` disables the effect. Must be finite and
+    /// in `[0.0, 1.0]`. Default: 0.0.
+    pub boundary_sigma_noise_amplitude: f32,
+
+    /// Spatial frequency multiplier for boundary sigma noise (step 6).
+    ///
+    /// Higher values vary range width over shorter boundary sections.
+    /// Must be finite and `> 0.0`. Default: 3.0.
+    pub boundary_sigma_noise_frequency: f32,
 
     /// Elevation modifier at continental–continental convergent
     /// boundaries (step 6). Produces high mountain ranges.
@@ -527,12 +608,18 @@ impl TectonicsParams {
             motion_magnitude_min: DEFAULT_MOTION_MAGNITUDE_MIN,
             motion_magnitude_max: DEFAULT_MOTION_MAGNITUDE_MAX,
             mineral_weights: DEFAULT_MINERAL_WEIGHTS.to_vec(),
+            plate_growth_rate_range: DEFAULT_PLATE_GROWTH_RATE_RANGE,
+            clumping_index: DEFAULT_CLUMPING_INDEX,
             convergence_threshold: DEFAULT_CONVERGENCE_THRESHOLD,
             continental_base_elevation: DEFAULT_CONTINENTAL_BASE_ELEVATION,
             oceanic_base_elevation: DEFAULT_OCEANIC_BASE_ELEVATION,
             intra_plate_noise_amplitude: DEFAULT_INTRA_PLATE_NOISE_AMPLITUDE,
             intra_plate_noise_frequency: DEFAULT_INTRA_PLATE_NOISE_FREQUENCY,
             boundary_falloff_sigma: DEFAULT_BOUNDARY_FALLOFF_SIGMA,
+            boundary_strength_noise_amplitude: DEFAULT_BOUNDARY_STRENGTH_NOISE_AMPLITUDE,
+            boundary_strength_noise_frequency: DEFAULT_BOUNDARY_STRENGTH_NOISE_FREQUENCY,
+            boundary_sigma_noise_amplitude: DEFAULT_BOUNDARY_SIGMA_NOISE_AMPLITUDE,
+            boundary_sigma_noise_frequency: DEFAULT_BOUNDARY_SIGMA_NOISE_FREQUENCY,
             mountain_elevation_boost: DEFAULT_MOUNTAIN_ELEVATION_BOOST,
             mountain_pass_threshold: DEFAULT_MOUNTAIN_PASS_THRESHOLD,
             mountain_pass_noise_frequency: DEFAULT_MOUNTAIN_PASS_NOISE_FREQUENCY,
@@ -586,6 +673,8 @@ impl TectonicsParams {
         }
         self.validate_level_proportions()?;
         self.validate_motion_and_minerals()?;
+        self.validate_plate_shape_params()?;
+        self.validate_boundary_noise_params()?;
         self.validate_elevation_and_hill_params()
     }
 
@@ -665,6 +754,62 @@ impl TectonicsParams {
             return Err(GenerationError::InvalidParams {
                 reason: "mineral_weights must have at least one entry > 0.0".to_owned(),
             });
+        }
+        Ok(())
+    }
+
+    fn validate_plate_shape_params(&self) -> Result<(), GenerationError> {
+        if !self.plate_growth_rate_range.is_finite() || self.plate_growth_rate_range < 1.0 {
+            return Err(GenerationError::InvalidParams {
+                reason: format!(
+                    "plate_growth_rate_range {} must be finite and >= 1.0",
+                    self.plate_growth_rate_range
+                ),
+            });
+        }
+        if !self.clumping_index.is_finite() || !(0.0..=1.0).contains(&self.clumping_index) {
+            return Err(GenerationError::InvalidParams {
+                reason: format!(
+                    "clumping_index {} must be finite and in [0.0, 1.0]",
+                    self.clumping_index
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    fn validate_boundary_noise_params(&self) -> Result<(), GenerationError> {
+        for (name, value) in [
+            (
+                "boundary_strength_noise_frequency",
+                self.boundary_strength_noise_frequency,
+            ),
+            (
+                "boundary_sigma_noise_frequency",
+                self.boundary_sigma_noise_frequency,
+            ),
+        ] {
+            if !value.is_finite() || value <= 0.0 {
+                return Err(GenerationError::InvalidParams {
+                    reason: format!("{name} = {value} must be finite and > 0.0"),
+                });
+            }
+        }
+        for (name, value) in [
+            (
+                "boundary_strength_noise_amplitude",
+                self.boundary_strength_noise_amplitude,
+            ),
+            (
+                "boundary_sigma_noise_amplitude",
+                self.boundary_sigma_noise_amplitude,
+            ),
+        ] {
+            if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+                return Err(GenerationError::InvalidParams {
+                    reason: format!("{name} = {value} must be finite and in [0.0, 1.0]"),
+                });
+            }
         }
         Ok(())
     }
@@ -982,6 +1127,48 @@ mod tests {
         }
     }
 
+    // ------------- plate shape params -------------
+
+    mod plate_shape_params {
+        use super::*;
+
+        #[test]
+        fn rejects_growth_rate_range_below_one() {
+            let params = TectonicsParams {
+                plate_growth_rate_range: 0.9,
+                ..TectonicsParams::defaults()
+            };
+            assert!(matches!(
+                params.validate(),
+                Err(GenerationError::InvalidParams { .. })
+            ));
+        }
+
+        #[test]
+        fn rejects_clumping_index_below_zero() {
+            let params = TectonicsParams {
+                clumping_index: -0.1,
+                ..TectonicsParams::defaults()
+            };
+            assert!(matches!(
+                params.validate(),
+                Err(GenerationError::InvalidParams { .. })
+            ));
+        }
+
+        #[test]
+        fn rejects_clumping_index_above_one() {
+            let params = TectonicsParams {
+                clumping_index: 1.1,
+                ..TectonicsParams::defaults()
+            };
+            assert!(matches!(
+                params.validate(),
+                Err(GenerationError::InvalidParams { .. })
+            ));
+        }
+    }
+
     // ------------- mineral weights -------------
 
     mod mineral_weights {
@@ -1037,6 +1224,82 @@ mod tests {
             params
                 .validate()
                 .expect("single nonzero weight must validate");
+        }
+    }
+
+    mod boundary_noise_params {
+        use super::*;
+
+        #[test]
+        fn rejects_negative_strength_noise_amplitude() {
+            let params = TectonicsParams {
+                boundary_strength_noise_amplitude: -0.1,
+                ..TectonicsParams::defaults()
+            };
+            assert!(matches!(
+                params.validate(),
+                Err(GenerationError::InvalidParams { .. })
+            ));
+        }
+
+        #[test]
+        fn rejects_strength_noise_amplitude_above_one() {
+            let params = TectonicsParams {
+                boundary_strength_noise_amplitude: 1.1,
+                ..TectonicsParams::defaults()
+            };
+            assert!(matches!(
+                params.validate(),
+                Err(GenerationError::InvalidParams { .. })
+            ));
+        }
+
+        #[test]
+        fn rejects_zero_strength_noise_frequency() {
+            let params = TectonicsParams {
+                boundary_strength_noise_frequency: 0.0,
+                ..TectonicsParams::defaults()
+            };
+            assert!(matches!(
+                params.validate(),
+                Err(GenerationError::InvalidParams { .. })
+            ));
+        }
+
+        #[test]
+        fn rejects_negative_sigma_noise_amplitude() {
+            let params = TectonicsParams {
+                boundary_sigma_noise_amplitude: -0.1,
+                ..TectonicsParams::defaults()
+            };
+            assert!(matches!(
+                params.validate(),
+                Err(GenerationError::InvalidParams { .. })
+            ));
+        }
+
+        #[test]
+        fn rejects_sigma_noise_amplitude_above_one() {
+            let params = TectonicsParams {
+                boundary_sigma_noise_amplitude: 1.1,
+                ..TectonicsParams::defaults()
+            };
+            assert!(matches!(
+                params.validate(),
+                Err(GenerationError::InvalidParams { .. })
+            ));
+        }
+
+        #[test]
+        fn rejects_zero_sigma_noise_frequency() {
+            let params = TectonicsParams {
+                boundary_sigma_noise_frequency: 0.0,
+                ..TectonicsParams::defaults()
+            };
+            assert!(matches!(
+                params.validate(),
+                Err(GenerationError::InvalidParams { .. })
+            ));
         }
     }
 

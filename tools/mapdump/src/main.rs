@@ -55,6 +55,11 @@
 //! - `33_05_floodplains_px.png` — floodplain feature mask.
 //! - `33_06_canyons_px.png` — canyon floor and wall mask.
 //! - `33_07_hydrology_overlay_hex.png` — elevation with lakes, rivers, and canyons.
+//!
+//! ## Stage 3.4 — Biomes
+//!
+//! - `34_01_biomes_hex.png` — categorical biome map.
+//! - `34_06_forest_density_px.png` — forest-density feature field.
 
 use std::path::Path;
 use std::path::PathBuf;
@@ -63,11 +68,11 @@ use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use tracing::info;
 use worldgen::{
-    BasicParams, BoundaryType, ClimateData, Direction, Field, HydrologyData, MapSize, RiverSize,
-    TectonicData, TuningParams, WorldParams,
+    BasicParams, Biome, BiomeData, BoundaryType, ClimateData, Direction, Field, HydrologyData,
+    MapSize, RiverSize, TectonicData, TuningParams, WorldParams,
     debug_viz::{
-        BoundaryCmap, Categorical, Colormap, Grayscale, HeightLevelCmap, Viridis, dump_field_hex,
-        dump_field_pixels, dump_field_with_seed_overlay, dump_rgb_field_hex,
+        BiomeCmap, BoundaryCmap, Categorical, Colormap, Grayscale, HeightLevelCmap, Viridis,
+        dump_field_hex, dump_field_pixels, dump_field_with_seed_overlay, dump_rgb_field_hex,
     },
     generate_world,
 };
@@ -130,6 +135,7 @@ fn main() -> Result<()> {
         &args.output,
         args.hex_size,
     )?;
+    write_biomes(&world.biomes, &args.output, args.hex_size)?;
 
     info!("done");
     Ok(())
@@ -619,6 +625,40 @@ fn river_size_to_f32(river_size: Option<RiverSize>) -> f32 {
         Some(RiverSize::Creek) => 1.0,
         Some(RiverSize::River) => 2.0,
         Some(RiverSize::MajorRiver) => 3.0,
+    }
+}
+
+// ------------- Output helpers (biomes) -------------
+
+fn write_biomes(biomes: &BiomeData, output: &Path, hex_size: u32) -> Result<()> {
+    let biome_path = output.join("34_01_biomes_hex.png");
+    info!(path = %biome_path.display(), "writing biome PNG");
+    dump_field_hex(
+        &biomes.biome,
+        &biome_path,
+        biome_to_f32,
+        &BiomeCmap,
+        hex_size,
+    )
+    .with_context(|| format!("failed to write {}", biome_path.display()))?;
+
+    let forest_path = output.join("34_06_forest_density_px.png");
+    info!(path = %forest_path.display(), "writing forest density PNG");
+    dump_field_pixels(&biomes.forest_density, &forest_path, |v| v, &Viridis)
+        .with_context(|| format!("failed to write {}", forest_path.display()))?;
+
+    Ok(())
+}
+
+fn biome_to_f32(biome: Option<Biome>) -> f32 {
+    match biome {
+        None => 0.0,
+        Some(Biome::TropicalRainforest) => 1.0,
+        Some(Biome::TemperateForest) => 2.0,
+        Some(Biome::BorealForest) => 3.0,
+        Some(Biome::Grassland) => 4.0,
+        Some(Biome::Desert) => 5.0,
+        Some(Biome::Tundra) => 6.0,
     }
 }
 

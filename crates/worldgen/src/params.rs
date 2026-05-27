@@ -23,6 +23,9 @@
 mod climate;
 pub use climate::{CFL_MAX_WIND_AMPLITUDE, ClimateParams};
 
+mod biomes;
+pub use biomes::BiomeParams;
+
 mod hydrology;
 pub use hydrology::HydrologyParams;
 
@@ -32,7 +35,11 @@ pub use tectonics::{
     MIN_DETAIL_NOISE_OCTAVES, MIN_LAND_LEVEL_COUNT, MIN_TARGET_PLATE_COUNT, TectonicsParams,
 };
 
+use std::path::PathBuf;
+
 use crate::error::GenerationError;
+
+const DEFAULT_BIOME_TABLE_PATH: &str = "assets/worldgen/biome_table.ron";
 
 /// The complete set of generation parameters and the master seed.
 ///
@@ -51,6 +58,8 @@ pub struct WorldParams {
     pub advanced: AdvancedParams,
     /// Full tunability layer — every internal generation knob.
     pub tuning: TuningParams,
+    /// Path to the designer-editable biome lookup table.
+    pub biome_table_path: PathBuf,
 }
 
 impl WorldParams {
@@ -66,6 +75,7 @@ impl WorldParams {
             basic: BasicParams::const_default(),
             advanced: AdvancedParams::const_default(),
             tuning: TuningParams::defaults(),
+            biome_table_path: PathBuf::from(DEFAULT_BIOME_TABLE_PATH),
         }
     }
 
@@ -302,8 +312,11 @@ pub struct TuningParams {
     /// Knobs consumed by the hydrology stage (design §1.11).
     #[serde(default)]
     pub hydrology: HydrologyParams,
-    // Biomes, resources, and starting-position sub-structs are added
-    // when their stages land.
+    /// Knobs consumed by the biome stage (design §1.12).
+    #[serde(default)]
+    pub biomes: BiomeParams,
+    // Resources and starting-position sub-structs are added when their
+    // stages land.
 }
 
 impl TuningParams {
@@ -317,6 +330,7 @@ impl TuningParams {
             tectonics: TectonicsParams::defaults(),
             climate: ClimateParams::defaults(),
             hydrology: HydrologyParams::defaults(),
+            biomes: BiomeParams::defaults(),
         }
     }
 
@@ -330,6 +344,7 @@ impl TuningParams {
         self.tectonics.validate()?;
         self.climate.validate()?;
         self.hydrology.validate()?;
+        self.biomes.validate()?;
         Ok(())
     }
 
@@ -341,6 +356,7 @@ impl TuningParams {
         self.tectonics.is_all_default()
             && self.climate.is_all_default()
             && self.hydrology.is_all_default()
+            && self.biomes.is_all_default()
     }
 }
 

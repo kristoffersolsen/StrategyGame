@@ -24,6 +24,15 @@ pub enum GenerationError {
         reason: String,
     },
 
+    /// The biome lookup table could not be loaded or failed validation.
+    #[error("invalid biome table {path}: {reason}")]
+    InvalidBiomeTable {
+        /// Path to the table being loaded.
+        path: String,
+        /// Human-readable description of the table problem.
+        reason: String,
+    },
+
     /// Starting-position selection (Stage 3.6, design §1.14) could not
     /// place all requested players while meeting the adequacy floor
     /// and spacing constraints.

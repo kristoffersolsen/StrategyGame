@@ -39,6 +39,7 @@ use coords::{Coord, MapBounds};
 use rand::RngExt;
 
 use crate::Field;
+use crate::params::TectonicsParams;
 use crate::rng::StageRng;
 use crate::world_data::PlateId;
 
@@ -74,6 +75,7 @@ const UNASSIGNED: PlateId = u8::MAX;
 pub(crate) fn grow_plates_organic(
     bounds: MapBounds,
     seeds: &[Coord],
+    params: &TectonicsParams,
     rng: &mut StageRng,
 ) -> Field<PlateId> {
     assert!(
@@ -85,6 +87,8 @@ pub(crate) fn grow_plates_organic(
 
     let mut plate_id = Field::filled(bounds, UNASSIGNED);
     let mut frontiers: Vec<Vec<Coord>> = vec![Vec::new(); n];
+    let growth_rates = sample_growth_rates(n, params, rng);
+    let mut growth_credit = vec![0.0_f32; n];
 
     // Claim seed tiles and populate initial frontiers.
     for (p, &seed) in seeds.iter().enumerate() {
@@ -102,27 +106,17 @@ pub(crate) fn grow_plates_organic(
     while remaining > 0 {
         #[allow(clippy::needless_range_loop)]
         for p in 0..n {
-            // Claim one tile for plate p, skipping stale frontier entries.
-            loop {
-                if frontiers[p].is_empty() {
+            growth_credit[p] += growth_rates[p];
+            while growth_credit[p] >= 1.0 {
+                if !claim_frontier_tile(bounds, &mut plate_id, &mut frontiers[p], p, rng) {
                     break;
                 }
-                let i = rng.random_range(0..frontiers[p].len());
-                let tile = frontiers[p][i];
-
-                if plate_id[tile] != UNASSIGNED {
-                    // Stale entry: claimed by another plate. Remove lazily.
-                    frontiers[p].swap_remove(i);
-                    continue;
-                }
-
-                // Claim this tile.
-                #[allow(clippy::cast_possible_truncation)]
-                plate_id.set(tile, p as PlateId);
-                frontiers[p].swap_remove(i);
                 remaining -= 1;
-                push_unassigned_neighbors(bounds, &plate_id, tile, &mut frontiers[p]);
-                break;
+                growth_credit[p] -= 1.0;
+
+                if remaining == 0 {
+                    break;
+                }
             }
 
             if remaining == 0 {
@@ -135,6 +129,50 @@ pub(crate) fn grow_plates_organic(
 }
 
 // ------------- Helper -------------
+
+fn sample_growth_rates(
+    plate_count: usize,
+    params: &TectonicsParams,
+    rng: &mut StageRng,
+) -> Vec<f32> {
+    if params.plate_growth_rate_range <= 1.0 {
+        return vec![1.0; plate_count];
+    }
+
+    let min = 1.0 / params.plate_growth_rate_range;
+    let max = params.plate_growth_rate_range;
+    (0..plate_count)
+        .map(|_| rng.random_range(min..=max))
+        .collect()
+}
+
+fn claim_frontier_tile(
+    bounds: MapBounds,
+    plate_id: &mut Field<PlateId>,
+    frontier: &mut Vec<Coord>,
+    plate_index: usize,
+    rng: &mut StageRng,
+) -> bool {
+    loop {
+        if frontier.is_empty() {
+            return false;
+        }
+        let i = rng.random_range(0..frontier.len());
+        let tile = frontier[i];
+
+        if plate_id[tile] != UNASSIGNED {
+            // Stale entry: claimed by another plate. Remove lazily.
+            frontier.swap_remove(i);
+            continue;
+        }
+
+        #[allow(clippy::cast_possible_truncation)]
+        plate_id.set(tile, plate_index as PlateId);
+        frontier.swap_remove(i);
+        push_unassigned_neighbors(bounds, plate_id, tile, frontier);
+        return true;
+    }
+}
 
 /// Pushes each unassigned neighbour of `tile` onto `frontier`.
 ///
@@ -165,6 +203,10 @@ mod tests {
         MasterRng::new(seed).fork(StageId::Tectonics)
     }
 
+    fn default_params() -> TectonicsParams {
+        TectonicsParams::defaults()
+    }
+
     // ------------- Coverage -------------
 
     mod coverage {
@@ -176,7 +218,7 @@ mod tests {
             let bounds = MapBounds::new(40, 30);
             let seeds = vec![Coord::new(10, 7), Coord::new(30, 20), Coord::new(20, 5)];
             let mut rng = make_rng(1);
-            let field = grow_plates_organic(bounds, &seeds, &mut rng);
+            let field = grow_plates_organic(bounds, &seeds, &default_params(), &mut rng);
 
             for (_, &id) in field.iter_coords() {
                 assert_ne!(id, UNASSIGNED, "tile must be assigned");
@@ -191,7 +233,7 @@ mod tests {
             #[allow(clippy::cast_possible_truncation)]
             let plate_count = seeds.len() as PlateId;
             let mut rng = make_rng(2);
-            let field = grow_plates_organic(bounds, &seeds, &mut rng);
+            let field = grow_plates_organic(bounds, &seeds, &default_params(), &mut rng);
 
             for (_, &id) in field.iter_coords() {
                 assert!(id < plate_count, "invalid plate id {id}");
@@ -204,7 +246,7 @@ mod tests {
             let bounds = MapBounds::new(40, 30);
             let seeds = vec![Coord::new(5, 5), Coord::new(25, 15), Coord::new(15, 25)];
             let mut rng = make_rng(3);
-            let field = grow_plates_organic(bounds, &seeds, &mut rng);
+            let field = grow_plates_organic(bounds, &seeds, &default_params(), &mut rng);
 
             for (p, &seed) in seeds.iter().enumerate() {
                 #[allow(clippy::cast_possible_truncation)]
@@ -228,7 +270,7 @@ mod tests {
             let bounds = MapBounds::new(20, 15);
             let seeds = vec![Coord::new(10, 7)];
             let mut rng = make_rng(4);
-            let field = grow_plates_organic(bounds, &seeds, &mut rng);
+            let field = grow_plates_organic(bounds, &seeds, &default_params(), &mut rng);
 
             for (_, &id) in field.iter_coords() {
                 assert_eq!(id, 0, "single plate must cover everything");
@@ -248,8 +290,8 @@ mod tests {
 
             let mut rng_a = make_rng(42);
             let mut rng_b = make_rng(42);
-            let a = grow_plates_organic(bounds, &seeds, &mut rng_a);
-            let b = grow_plates_organic(bounds, &seeds, &mut rng_b);
+            let a = grow_plates_organic(bounds, &seeds, &default_params(), &mut rng_a);
+            let b = grow_plates_organic(bounds, &seeds, &default_params(), &mut rng_b);
 
             assert_eq!(a.as_slice(), b.as_slice());
         }
@@ -261,8 +303,8 @@ mod tests {
 
             let mut rng_a = make_rng(1);
             let mut rng_b = make_rng(2);
-            let a = grow_plates_organic(bounds, &seeds, &mut rng_a);
-            let b = grow_plates_organic(bounds, &seeds, &mut rng_b);
+            let a = grow_plates_organic(bounds, &seeds, &default_params(), &mut rng_a);
+            let b = grow_plates_organic(bounds, &seeds, &default_params(), &mut rng_b);
 
             assert_ne!(a.as_slice(), b.as_slice());
         }
@@ -282,7 +324,7 @@ mod tests {
             // West-edge seed; central seed keeps it from dominating the map.
             let seeds = vec![Coord::new(1, 10), Coord::new(20, 10)];
             let mut rng = make_rng(7);
-            let field = grow_plates_organic(bounds, &seeds, &mut rng);
+            let field = grow_plates_organic(bounds, &seeds, &default_params(), &mut rng);
 
             // Tiles at q=38 and q=39 are 3 and 2 steps from seed 0 via wrap.
             // Without correct wrap-aware neighbour traversal they could be

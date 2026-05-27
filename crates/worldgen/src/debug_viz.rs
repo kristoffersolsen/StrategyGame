@@ -43,6 +43,7 @@ use coords::Coord;
 use image::{ImageError, RgbImage};
 
 use crate::Field;
+use crate::world_data::Biome;
 
 // ------------- Error type -------------
 
@@ -593,6 +594,40 @@ impl Colormap for HeightLevelCmap {
                 };
                 [lerp(230, 175), lerp(155, 40), lerp(55, 20)]
             }
+        }
+    }
+}
+
+/// Categorical colour map for biome classifications.
+pub struct BiomeCmap;
+
+impl BiomeCmap {
+    /// Returns the RGB colour for an optional biome.
+    #[must_use]
+    pub const fn color_for_biome(biome: Option<Biome>) -> [u8; 3] {
+        match biome {
+            None => [45, 55, 65],
+            Some(Biome::TropicalRainforest) => [0, 118, 74],
+            Some(Biome::TemperateForest) => [80, 145, 60],
+            Some(Biome::BorealForest) => [43, 92, 105],
+            Some(Biome::Grassland) => [196, 190, 85],
+            Some(Biome::Desert) => [218, 184, 105],
+            Some(Biome::Tundra) => [198, 212, 218],
+        }
+    }
+}
+
+impl Colormap for BiomeCmap {
+    fn color(&self, value: f32) -> [u8; 3] {
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        match value.round() as u8 {
+            1 => Self::color_for_biome(Some(Biome::TropicalRainforest)),
+            2 => Self::color_for_biome(Some(Biome::TemperateForest)),
+            3 => Self::color_for_biome(Some(Biome::BorealForest)),
+            4 => Self::color_for_biome(Some(Biome::Grassland)),
+            5 => Self::color_for_biome(Some(Biome::Desert)),
+            6 => Self::color_for_biome(Some(Biome::Tundra)),
+            _ => Self::color_for_biome(None),
         }
     }
 }

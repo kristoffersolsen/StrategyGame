@@ -11,6 +11,41 @@ use coords::{Coord, Direction, MapBounds};
 
 use crate::Field;
 
+// ------------- Biome classification -------------
+
+/// Land biome assigned from temperature and moisture.
+///
+/// Water, coast, lake, and mountain tiles receive no biome assignment;
+/// those are terrain or hydrology states owned by earlier stages.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub enum Biome {
+    /// Hot and wet forest biome.
+    TropicalRainforest,
+    /// Moderate-temperature forest biome.
+    TemperateForest,
+    /// Cold taiga forest biome.
+    BorealForest,
+    /// Open grassland or savanna biome.
+    Grassland,
+    /// Low-moisture biome at any temperature.
+    Desert,
+    /// Cold sparse-ground biome.
+    Tundra,
+}
+
+impl Biome {
+    /// Returns `true` if this biome supports forest-density output.
+    #[must_use]
+    pub const fn is_forest(self) -> bool {
+        matches!(
+            self,
+            Self::TropicalRainforest | Self::TemperateForest | Self::BorealForest
+        )
+    }
+}
+
 // ------------- Boundary classification -------------
 
 /// The interaction type at a boundary between two adjacent tectonic plates.
@@ -314,6 +349,14 @@ pub struct HydrologyData {
     /// Tiles marked as inland lakes by basin resolution.
     pub is_lake: Field<bool>,
 
+    /// Spill-point outlet coordinate for each lake tile.
+    ///
+    /// `Some(coord)` is the first land tile outside the lake basin where
+    /// accumulated flow exits.  `None` means the lake is a true sink (no
+    /// outside neighbor — fully enclosed map edge case).  Non-lake tiles
+    /// always hold `None`.
+    pub lake_outlet: Field<Option<Coord>>,
+
     /// River classification for each tile, if accumulated flow crosses
     /// the configured river threshold.
     pub river_size: Field<Option<RiverSize>>,
@@ -344,11 +387,40 @@ impl HydrologyData {
             flow_direction: Field::filled(bounds, None),
             flow_accumulation: Field::filled(bounds, 0.0),
             is_lake: Field::filled(bounds, false),
+            lake_outlet: Field::filled(bounds, None),
             river_size: Field::filled(bounds, None),
             is_floodplain: Field::filled(bounds, false),
             is_canyon: Field::filled(bounds, false),
             is_canyon_wall: Field::filled(bounds, false),
             height_level: Field::filled(bounds, 0),
+        }
+    }
+}
+
+// ------------- Biome sub-structure -------------
+
+/// Data produced by the biome stage (Stage 3.4, design §1.12).
+#[derive(Debug, Clone)]
+pub struct BiomeData {
+    /// Per-land-tile biome classification.
+    ///
+    /// `None` for ocean, coast, lakes, and mountain-level tiles.
+    pub biome: Field<Option<Biome>>,
+
+    /// Rendering hint for forest coverage density.
+    ///
+    /// Values are in `[0.0, 1.0]`. Non-forest biomes and non-biome
+    /// tiles receive `0.0`.
+    pub forest_density: Field<f32>,
+}
+
+impl BiomeData {
+    /// Constructs an empty [`BiomeData`] for the given map bounds.
+    #[must_use]
+    pub fn empty(bounds: MapBounds) -> Self {
+        Self {
+            biome: Field::filled(bounds, None),
+            forest_density: Field::filled(bounds, 0.0),
         }
     }
 }
@@ -363,7 +435,7 @@ impl HydrologyData {
 /// - Stage 3.1 (tectonics) → [`TectonicData`]
 /// - Stage 3.2 (climate) → [`ClimateData`]
 /// - Stage 3.3 (hydrology) → [`HydrologyData`]
-/// - Stage 3.4 (biomes) → `BiomeData` (not yet added)
+/// - Stage 3.4 (biomes) → [`BiomeData`]
 /// - Stage 3.5 (resources) → `ResourceData` (not yet added)
 /// - Stage 3.6 (starting positions) → `Vec<Coord>` (not yet added)
 ///
@@ -383,6 +455,9 @@ pub struct WorldData {
 
     /// Output of the hydrology stage (design §1.11).
     pub hydrology: HydrologyData,
+
+    /// Output of the biome stage (design §1.12).
+    pub biomes: BiomeData,
 }
 
 impl WorldData {
@@ -395,6 +470,7 @@ impl WorldData {
             tectonics: TectonicData::empty(bounds),
             climate: ClimateData::empty(bounds),
             hydrology: HydrologyData::empty(bounds),
+            biomes: BiomeData::empty(bounds),
         }
     }
 }

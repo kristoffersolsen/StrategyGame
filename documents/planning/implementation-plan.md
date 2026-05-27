@@ -597,6 +597,6 @@ If the plan and reality drift, the plan is wrong. Fix it.
 
 ## Status
 
-**Current stage:** Stage 3.3 complete.
+**Current stage:** Stage 3.4 complete.
 
-**Next action:** Begin stage 3.4 — Biomes.
+**Next action:** Begin stage 3.5 — Resource placement.

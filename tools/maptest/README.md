@@ -46,7 +46,7 @@ cargo run --release --bin maptest -- run [OPTIONS]
 
 Options:
   --seeds <N>...          Seeds to generate [default: 1 2 3 4 5 6 7 8]
-  --params <FILE>         RON file with TectonicsParams [default: built-in defaults]
+  --params <FILE>         RON file with TuningParams [default: built-in defaults]
   --output <DIR>          Output directory [default: tmp/tests/mapgen]
   --size <SIZE>           Map size: small | standard | medium | large | huge [default: medium]
   --hex-size <PX>         Hex tile circumradius in pixels [default: 16]
@@ -58,21 +58,21 @@ directory; filename prefixes distinguish the pipeline stage.
 
 ### `sweep`
 
-Vary a single `TectonicsParams` scalar field across an evenly-spaced
+Vary a single sweepable `TuningParams` scalar field across an evenly-spaced
 range and generate all (value, seed) pairs in parallel.
 
 ```
 cargo run --release --bin maptest -- sweep [OPTIONS]
 
 Required:
-  --param <NAME>          TectonicsParams field name in snake_case
+  --param <NAME>          TuningParams field name in snake_case
   --min <F>               Range minimum (inclusive)
   --max <F>               Range maximum (inclusive)
   --steps <N>             Number of values to generate (minimum 2)
 
 Options:
   --seeds <N>...          Seeds per value [default: 1 2 3 4]
-  --params <FILE>         RON file with base TectonicsParams
+  --params <FILE>         RON file with base TuningParams
   --output <DIR>          Output directory [default: tmp/tests/tuning/<param>]
   --size <SIZE>           Map size [default: medium]
   --hex-size <PX>         Hex tile circumradius in pixels [default: 16]
@@ -83,8 +83,9 @@ Output files are written to `<output>/` with filenames like
 `31_08_height_levels_hex_v0.4000_3.png`, where `v0.4000` is the
 parameter value and `3` is the seed.
 
-Vec fields (`level_proportions`, `mineral_weights`) cannot be swept as
-scalars; set them via `--params` instead.
+Vec fields (`level_proportions`, `mineral_weights`) and biome bin counts
+cannot be swept as scalars; set them via `--params` and matching data
+files instead.
 
 ---
 
@@ -102,6 +103,19 @@ Each (value, seed) pair produces this set of images:
 | `31_08_height_levels_px` | Discrete height levels, one pixel per tile |
 | `31_08_height_levels_hex` | Discrete height levels, hex-rasterized |
 | `31_09_hills_px` | Hilliness field (white=hilly, black=flat) |
+| `32_01_temperature_hex` | Temperature field, hex-rasterized |
+| `32_02_wind_px` | Wind magnitude field |
+| `32_06_moisture_px` | Final steady-state moisture field |
+| `32_06_precipitation_hex` | Total precipitation, hex-rasterized |
+| `33_01_flow_direction_hex` | Downstream flow direction |
+| `33_02_flow_accumulation_hex` | Log-scale accumulated flow |
+| `33_03_lakes` | Lake mask |
+| `33_04_rivers` | River tier classification |
+| `33_05_floodplains` | Floodplain feature mask |
+| `33_06_canyons` | Canyon floor and wall mask |
+| `33_07_hydrology_overlay` | Height levels with lakes, rivers, and canyons |
+| `biomes` | Categorical biome map |
+| `forest_density` | Forest-density feature field |
 
 File prefixes are the pipeline step number so files sort in generation
 order in any file browser.
@@ -110,15 +124,16 @@ order in any file browser.
 
 ## Preset files
 
-A preset file is a RON-serialized `TectonicsParams` struct. Any field
-omitted from the file takes the built-in default value.
+A preset file is a RON-serialized `TuningParams` struct. Any sub-struct
+or field omitted from the file takes the built-in default value.
 
 ```ron
 // tools/maptest/presets/my-preset.ron
 (
-    target_plate_count: 14,
-    boundary_perturbation_amplitude: 10.0,
-    mountain_elevation_boost: 1.6,
+    tectonics: (
+        target_plate_count: 14,
+        mountain_elevation_boost: 1.6,
+    ),
     // all other fields use defaults
 )
 ```
@@ -138,14 +153,17 @@ starting point for new presets.
 
 ## Sweepable fields
 
-All scalar fields of `TectonicsParams` can be passed to `--param`:
+Scalar fields exposed by `set_param` can be passed to `--param`:
 
 ```
-target_plate_count            boundary_perturbation_amplitude
-motion_magnitude_min          motion_magnitude_max
-convergence_threshold         continental_base_elevation
-oceanic_base_elevation        intra_plate_noise_amplitude
-intra_plate_noise_frequency   boundary_falloff_sigma
+target_plate_count            plate_growth_rate_range
+clumping_index                motion_magnitude_min
+motion_magnitude_max          convergence_threshold
+continental_base_elevation    oceanic_base_elevation
+intra_plate_noise_amplitude   intra_plate_noise_frequency
+boundary_falloff_sigma        boundary_strength_noise_amplitude
+boundary_strength_noise_frequency boundary_sigma_noise_amplitude
+boundary_sigma_noise_frequency
 mountain_elevation_boost      coastal_mountain_boost
 subduction_trench_penalty     island_arc_boost
 rift_valley_penalty           mid_ocean_ridge_boost
@@ -153,11 +171,18 @@ detail_noise_amplitude        detail_noise_frequency
 detail_noise_octaves          land_level_count
 hill_influence_radius         hill_near_boundary_threshold
 hill_interior_threshold       hill_noise_frequency
+mountain_pass_threshold       mountain_pass_noise_frequency
+lake_basin_area_threshold     river_flow_threshold
+major_river_flow_threshold    floodplain_elevation_tolerance
+canyon_flow_slope_threshold   canyon_depth
+hydrology_override_strength   smoothing_passes
+forest_noise_frequency        forest_noise_amplitude
 ```
 
 Integer fields (`target_plate_count`, `land_level_count`,
-`detail_noise_octaves`, `hill_influence_radius`) are rounded before
-casting, so `--min 2 --max 5 --steps 4` gives values 2, 3, 4, 5.
+`detail_noise_octaves`, `hill_influence_radius`, `canyon_depth`,
+`smoothing_passes`) are rounded before casting, so
+`--min 2 --max 5 --steps 4` gives values 2, 3, 4, 5.
 
 ---
 

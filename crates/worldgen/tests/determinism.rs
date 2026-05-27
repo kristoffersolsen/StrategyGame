@@ -35,8 +35,8 @@
 
 use blake3::Hasher;
 use worldgen::{
-    BasicParams, BoundaryType, Direction, Field, MapSize, MineralCharacter, PlateType, RiverSize,
-    WorldParams,
+    BasicParams, Biome, BoundaryType, Direction, Field, MapSize, MineralCharacter, PlateType,
+    RiverSize, WorldParams,
     debug_viz::{Grayscale, dump_field_pixels},
     generate_world,
 };
@@ -61,7 +61,7 @@ fn test_params(seed: u64) -> WorldParams {
 fn world_data_hash(params: &WorldParams) -> blake3::Hash {
     let world = generate_world(params).expect("generate_world failed");
     let mut hasher = Hasher::new();
-    hasher.update(b"WorldData:v3");
+    hasher.update(b"WorldData:v4");
     hasher.update(&world.bounds.width().to_le_bytes());
     hasher.update(&world.bounds.height().to_le_bytes());
 
@@ -115,6 +115,11 @@ fn world_data_hash(params: &WorldParams) -> blake3::Hash {
         update_u8(&mut hasher, u8::from(is_canyon_wall));
     }
     hasher.update(world.hydrology.height_level.as_slice());
+
+    for &biome in world.biomes.biome.as_slice() {
+        update_u8(&mut hasher, biome_tag(biome));
+    }
+    update_f32_field(&mut hasher, &world.biomes.forest_density);
 
     hasher.finalize()
 }
@@ -186,6 +191,18 @@ fn river_tag(river: Option<RiverSize>) -> u8 {
         Some(RiverSize::Creek) => 1,
         Some(RiverSize::River) => 2,
         Some(RiverSize::MajorRiver) => 3,
+    }
+}
+
+fn biome_tag(biome: Option<Biome>) -> u8 {
+    match biome {
+        None => 0,
+        Some(Biome::TropicalRainforest) => 1,
+        Some(Biome::TemperateForest) => 2,
+        Some(Biome::BorealForest) => 3,
+        Some(Biome::Grassland) => 4,
+        Some(Biome::Desert) => 5,
+        Some(Biome::Tundra) => 6,
     }
 }
 
@@ -339,7 +356,7 @@ mod reference_hash {
     /// This value must be updated whenever generation output changes
     /// intentionally.
     const REFERENCE_WORLD_DATA_HASH: &str =
-        "5ab437190225fc3b435fae6f38404bcfbfbe257cf3cc1aa5aad68b02ee575c12";
+        "74a38dff3f6675fe9580aac4a9c38f217955c9978f191fb57b80e2ebc56dfe29";
 
     #[test]
     fn world_data_matches_committed_reference_hash() {

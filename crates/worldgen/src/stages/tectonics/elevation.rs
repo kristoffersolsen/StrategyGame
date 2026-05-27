@@ -8,9 +8,12 @@
 //!    plate structure.
 //! 3. **Boundary effects** — each boundary tile receives an elevation
 //!    modifier derived from the `(own plate type, adjacent plate type,
-//!    boundary type)` lookup table, then that modifier is propagated
-//!    outward via a Gaussian falloff (standard deviation
-//!    `boundary_falloff_sigma` tiles).
+//!    boundary type)` lookup table. Optional coherent source-strength
+//!    noise breaks continuous ranges into chains and gaps, optional
+//!    coherent sigma noise varies the local falloff width, and the
+//!    resulting modifier is propagated outward via a Gaussian falloff
+//!    (standard deviation `boundary_falloff_sigma` tiles before local
+//!    sigma modulation).
 //!
 //! Step 7 adds a multi-octave detail-noise overlay uniformly over the
 //! elevation field to introduce fine-grained topographic texture.
@@ -23,9 +26,9 @@
 //!
 //! # Noise seeds
 //!
-//! The two noise seeds (`intra_noise_seed` and `detail_noise_seed`) are
-//! drawn from the tectonics [`StageRng`] in `tectonics::run` and passed
-//! in explicitly so this module is pure-function (no RNG state).
+//! The noise seeds are supplied by `tectonics::run` so this module is
+//! pure-function (no RNG state). Boundary-effect noise uses a derived
+//! seed and is a no-op unless its amplitudes are non-zero.
 
 use std::f64::consts::TAU;
 
@@ -51,7 +54,24 @@ const TORUS_RADIUS: f64 = 1.0 / (2.0 * std::f64::consts::PI);
 /// the noise varies at similar spatial frequency in both axes.
 const NOISE_Z_SCALE: f64 = 1.0 / 150.0;
 
+/// Lower clamp for local boundary falloff width.
+const BOUNDARY_SIGMA_MIN_SCALE: f32 = 0.35;
+
+/// Upper clamp for local boundary falloff width.
+const BOUNDARY_SIGMA_MAX_SCALE: f32 = 1.75;
+
 // ------------- Public entry point -------------
+
+/// Seeds for each noise field used by elevation construction.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ElevationNoiseSeeds {
+    /// `OpenSimplex` seed for intra-plate noise.
+    pub(crate) intra: u32,
+    /// `OpenSimplex` seed for boundary strength/sigma noise.
+    pub(crate) boundary: u32,
+    /// `OpenSimplex` seed for detail-noise octaves.
+    pub(crate) detail: u32,
+}
 
 /// Builds the continuous elevation field by combining plate bases,
 /// intra-plate noise, boundary effects, and multi-octave detail noise.
@@ -68,21 +88,19 @@ const NOISE_Z_SCALE: f64 = 1.0 / 150.0;
 /// * `seeds` — plate seed coordinates from step 1.
 /// * `boundary_type` — per-tile boundary classification from step 5.
 /// * `params` — tectonics tuning parameters.
-/// * `intra_noise_seed` — `OpenSimplex` seed for intra-plate noise.
-/// * `detail_noise_seed` — `OpenSimplex` seed for detail-noise octaves.
+/// * `noise_seeds` — deterministic seeds for the elevation noise fields.
 pub(crate) fn build_elevation_field(
     bounds: MapBounds,
     plate_id: &Field<PlateId>,
     plates: &[Plate],
     boundary_type: &Field<Option<BoundaryType>>,
     params: &TectonicsParams,
-    intra_noise_seed: u32,
-    detail_noise_seed: u32,
+    noise_seeds: ElevationNoiseSeeds,
 ) -> Field<f32> {
     let width_f64 = f64::from(bounds.width());
 
     // Step 6a: per-tile plate base + intra-plate noise.
-    let intra_noise = OpenSimplex::new(intra_noise_seed);
+    let intra_noise = OpenSimplex::new(noise_seeds.intra);
     let freq = f64::from(params.intra_plate_noise_frequency);
 
     let mut elevation = Field::from_fn(bounds, |tile| {
@@ -105,10 +123,17 @@ pub(crate) fn build_elevation_field(
         plates,
         boundary_type,
         params,
+        noise_seeds.boundary,
     );
 
     // Step 7: multi-octave detail-noise overlay.
-    add_detail_noise(&mut elevation, bounds, params, detail_noise_seed, width_f64);
+    add_detail_noise(
+        &mut elevation,
+        bounds,
+        params,
+        noise_seeds.detail,
+        width_f64,
+    );
 
     elevation
 }
@@ -128,10 +153,22 @@ fn add_boundary_effects(
     plates: &[Plate],
     boundary_type: &Field<Option<BoundaryType>>,
     params: &TectonicsParams,
+    noise_seed: u32,
 ) {
-    let sigma = params.boundary_falloff_sigma;
+    let base_sigma = params.boundary_falloff_sigma;
+    let width_f64 = f64::from(bounds.width());
+    let strength_noise =
+        (params.boundary_strength_noise_amplitude > 0.0).then(|| OpenSimplex::new(noise_seed));
+    let sigma_noise = (params.boundary_sigma_noise_amplitude > 0.0)
+        .then(|| OpenSimplex::new(noise_seed.wrapping_add(0x9E37_79B9)));
+    let max_sigma_scale = if params.boundary_sigma_noise_amplitude > 0.0 {
+        (1.0 + params.boundary_sigma_noise_amplitude).min(BOUNDARY_SIGMA_MAX_SCALE)
+    } else {
+        1.0
+    };
+    let max_sigma = base_sigma * max_sigma_scale;
     #[allow(clippy::cast_possible_truncation)]
-    let max_radius = (3.0 * sigma).ceil() as i32;
+    let max_radius = (3.0 * max_sigma).ceil() as i32;
 
     for (source, &opt_bt) in boundary_type.iter_coords() {
         let Some(bt) = opt_bt else { continue };
@@ -153,6 +190,13 @@ fn add_boundary_effects(
             continue;
         }
 
+        let strength_scale =
+            boundary_strength_scale(source, width_f64, params, strength_noise.as_ref());
+        if strength_scale == 0.0 {
+            continue;
+        }
+        let local_sigma = boundary_sigma(source, width_f64, params, sigma_noise.as_ref());
+
         // Propagate modifier to all tiles within max_radius.
         let height = bounds.height().cast_signed();
         for dr in -max_radius..=max_radius {
@@ -164,12 +208,12 @@ fn add_boundary_effects(
                 let target = Coord::new(source.q + dq, target_r);
                 #[allow(clippy::cast_precision_loss)]
                 let dist = bounds.distance(source, target) as f32;
-                if dist > 3.0 * sigma {
+                if dist > 3.0 * local_sigma {
                     continue;
                 }
-                let weight = gaussian(dist, sigma);
+                let weight = gaussian(dist, local_sigma);
                 if let Some(cell) = elevation.get_mut(target) {
-                    *cell += total_modifier * weight;
+                    *cell += total_modifier * strength_scale * weight;
                 }
             }
         }
@@ -216,6 +260,83 @@ fn elevation_modifier(
 fn gaussian(distance: f32, sigma: f32) -> f32 {
     let exponent = -(distance * distance) / (2.0 * sigma * sigma);
     exponent.exp()
+}
+
+/// Coherent multiplier for boundary source strength.
+///
+/// With amplitude zero this returns exactly `1.0`. Non-zero amplitudes
+/// blend from the original uniform contribution toward a smooth mask
+/// sampled at the boundary source tile.
+fn boundary_strength_scale(
+    source: Coord,
+    width_f64: f64,
+    params: &TectonicsParams,
+    noise: Option<&OpenSimplex>,
+) -> f32 {
+    let amplitude = params.boundary_strength_noise_amplitude;
+    let Some(noise) = noise.filter(|_| amplitude > 0.0) else {
+        return 1.0;
+    };
+
+    let sample = normalized_noise_sample(
+        noise,
+        source,
+        width_f64,
+        f64::from(params.boundary_strength_noise_frequency),
+    );
+    let mask = smoothstep(0.25, 0.85, sample);
+    1.0 - amplitude + amplitude * mask
+}
+
+/// Local Gaussian sigma for one boundary source tile.
+///
+/// With amplitude zero this returns exactly `boundary_falloff_sigma`.
+/// Non-zero amplitudes vary the width coherently per source tile and
+/// clamp the result to keep propagation radius bounded.
+fn boundary_sigma(
+    source: Coord,
+    width_f64: f64,
+    params: &TectonicsParams,
+    noise: Option<&OpenSimplex>,
+) -> f32 {
+    let amplitude = params.boundary_sigma_noise_amplitude;
+    let Some(noise) = noise.filter(|_| amplitude > 0.0) else {
+        return params.boundary_falloff_sigma;
+    };
+
+    let sample = signed_noise_sample(
+        noise,
+        source,
+        width_f64,
+        f64::from(params.boundary_sigma_noise_frequency),
+    );
+    let scale =
+        (1.0 + amplitude * sample).clamp(BOUNDARY_SIGMA_MIN_SCALE, BOUNDARY_SIGMA_MAX_SCALE);
+    params.boundary_falloff_sigma * scale
+}
+
+/// Samples coherent noise and clamps it to `OpenSimplex`'s expected
+/// `[-1, 1]` range before returning it as `f32`.
+fn signed_noise_sample(noise: &OpenSimplex, tile: Coord, width_f64: f64, frequency: f64) -> f32 {
+    #[allow(clippy::cast_possible_truncation)]
+    let sample = noise.get(noise_input(tile, width_f64, frequency)) as f32;
+    sample.clamp(-1.0, 1.0)
+}
+
+/// Samples coherent noise and remaps it to `[0, 1]`.
+fn normalized_noise_sample(
+    noise: &OpenSimplex,
+    tile: Coord,
+    width_f64: f64,
+    frequency: f64,
+) -> f32 {
+    (signed_noise_sample(noise, tile, width_f64, frequency) + 1.0) * 0.5
+}
+
+/// Cubic Hermite interpolation over `[edge0, edge1]`.
+fn smoothstep(edge0: f32, edge1: f32, value: f32) -> f32 {
+    let t = ((value - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
 }
 
 // ------------- Detail noise (step 7) -------------
@@ -304,7 +425,7 @@ mod tests {
         let mut rng = MasterRng::new(seed).fork(StageId::Tectonics);
 
         let seeds = place_plate_seeds(bounds, &params, &mut rng);
-        let plate_id = grow_plates_organic(bounds, &seeds, &mut rng);
+        let plate_id = grow_plates_organic(bounds, &seeds, &params, &mut rng);
 
         let plates = assign_plate_properties(seeds.len(), &params, &mut rng);
 
@@ -318,14 +439,19 @@ mod tests {
 
         let intra_seed: u32 = rng.next_u32();
         let detail_seed: u32 = rng.next_u32();
+        let boundary_seed = intra_seed.rotate_left(13) ^ detail_seed.rotate_right(7) ^ 0xA511_E9B3;
+        let noise_seeds = ElevationNoiseSeeds {
+            intra: intra_seed,
+            boundary: boundary_seed,
+            detail: detail_seed,
+        };
         build_elevation_field(
             bounds,
             &plate_id,
             &plates,
             &boundary_type,
             &params,
-            intra_seed,
-            detail_seed,
+            noise_seeds,
         )
     }
 
