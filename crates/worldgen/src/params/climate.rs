@@ -22,6 +22,13 @@ use crate::error::GenerationError;
 /// documented in ADR-0005.
 pub const CFL_MAX_WIND_AMPLITUDE: f32 = 0.25;
 
+/// Maximum allowed isotropic diffusion rate per advection iteration.
+///
+/// With [`CFL_MAX_WIND_AMPLITUDE`] limiting wind outflow to at most
+/// `0.5`, diffusion must be no more than `0.5` so total outflow cannot
+/// exceed the tile's current moisture.
+pub(crate) const MAX_DIFFUSION_RATE: f32 = 0.5;
+
 // ------------- Default values -------------
 
 /// Default normalised temperature at the equator.
@@ -462,6 +469,17 @@ impl ClimateParams {
                 ),
             });
         }
+        let max_wind_magnitude =
+            self.wind_amplitude + std::f32::consts::SQRT_2 * self.wind_noise_amplitude;
+        if max_wind_magnitude > CFL_MAX_WIND_AMPLITUDE {
+            return Err(GenerationError::InvalidParams {
+                reason: format!(
+                    "wind_amplitude {} plus worst-case wind_noise_amplitude {} \
+                     can produce magnitude {max_wind_magnitude}, exceeding CFL cap {CFL_MAX_WIND_AMPLITUDE}",
+                    self.wind_amplitude, self.wind_noise_amplitude
+                ),
+            });
+        }
         if !self.wind_noise_frequency.is_finite() || self.wind_noise_frequency <= 0.0 {
             return Err(GenerationError::InvalidParams {
                 reason: format!(
@@ -532,11 +550,11 @@ impl ClimateParams {
     fn validate_precipitation(&self) -> Result<(), GenerationError> {
         if !self.diffusion_rate.is_finite()
             || self.diffusion_rate < 0.0
-            || self.diffusion_rate > 0.5
+            || self.diffusion_rate > MAX_DIFFUSION_RATE
         {
             return Err(GenerationError::InvalidParams {
                 reason: format!(
-                    "diffusion_rate {} must be finite and in [0.0, 0.5]",
+                    "diffusion_rate {} must be finite and in [0.0, {MAX_DIFFUSION_RATE}]",
                     self.diffusion_rate
                 ),
             });
@@ -678,6 +696,7 @@ mod tests {
         fn accepts_wind_amplitude_at_cfl_cap() {
             let params = ClimateParams {
                 wind_amplitude: CFL_MAX_WIND_AMPLITUDE,
+                wind_noise_amplitude: 0.0,
                 ..ClimateParams::defaults()
             };
             params
@@ -689,6 +708,19 @@ mod tests {
         fn rejects_negative_wind_amplitude() {
             let params = ClimateParams {
                 wind_amplitude: -0.1,
+                ..ClimateParams::defaults()
+            };
+            assert!(matches!(
+                params.validate(),
+                Err(GenerationError::InvalidParams { .. })
+            ));
+        }
+
+        #[test]
+        fn rejects_wind_plus_noise_above_cfl_cap() {
+            let params = ClimateParams {
+                wind_amplitude: 0.24,
+                wind_noise_amplitude: 0.02,
                 ..ClimateParams::defaults()
             };
             assert!(matches!(

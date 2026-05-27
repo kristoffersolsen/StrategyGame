@@ -110,7 +110,7 @@ const DEFAULT_INTRA_PLATE_NOISE_AMPLITUDE: f32 = 0.05;
 ///
 /// Scales the noise-input coordinates uniformly; higher values produce
 /// finer detail within plates. The underlying scale follows the torus
-/// convention from `perturbation.rs`.
+/// convention used by the tectonics noise fields.
 const DEFAULT_INTRA_PLATE_NOISE_FREQUENCY: f32 = 2.0;
 
 /// Default Gaussian falloff sigma for boundary-effect propagation.

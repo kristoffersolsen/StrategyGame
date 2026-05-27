@@ -55,10 +55,10 @@ pub(crate) fn quantize_elevation(
     // Compute cumulative threshold indices from level_proportions.
     let thresholds = compute_thresholds(&sorted, &params.level_proportions);
 
-    // Sea-level offset: the threshold between ocean/coast and land.
-    // Index 1 is the cumulative proportion after ocean; index 2 is after coast.
-    // The sea-level threshold is at the end of the coast band (index 2).
-    let sea_level_threshold = thresholds[1]; // threshold between ocean and coast
+    // Sea-level offset: the threshold between coast and land. Coast
+    // tiles are water for downstream systems, so level 2 (first land
+    // level) begins at normalised elevation 0.
+    let sea_level_threshold = thresholds[2];
     // Shift so sea level = 0.
     for cell in elevation.iter_mut() {
         *cell -= sea_level_threshold;
@@ -189,12 +189,14 @@ mod tests {
 
             for (tile, &level) in levels.iter_coords() {
                 let elev = elevation[tile];
-                if level == 0 {
-                    // Ocean tiles must be below sea level.
+                if level <= 1 {
+                    // Ocean and coast tiles are water and must be below sea level.
                     assert!(
                         elev < 0.0 || elev.abs() < 1e-4,
-                        "ocean tile has non-negative elevation {elev}"
+                        "water tile has non-negative elevation {elev}"
                     );
+                } else {
+                    assert!(elev >= -1e-4, "land tile has negative elevation {elev}");
                 }
             }
         }

@@ -47,10 +47,10 @@ in a single pass over the field.
 ### Coordinate frame: Cartesian hex space
 
 Wind vectors are expressed in a 2D Cartesian frame derived from the
-flat-top hex axial-to-Cartesian mapping:
+pointy-top hex axial-to-Cartesian mapping used by the `coords` crate:
 
 ```
-x = 3/2 · q,   y = √3/2 · q + √3 · r
+x = √3 · (q + r/2),   y = 3/2 · r
 ```
 
 The six neighbour unit vectors are computed by applying this mapping
@@ -58,9 +58,9 @@ to each of the six axial direction offsets and normalising. The
 resulting unit vectors are spaced exactly 60° apart:
 
 ```
-East:      (√3/2,  1/2)    West:      (−√3/2, −1/2)
-NorthEast: (√3/2, −1/2)    NorthWest: (0,     −1)
-SouthEast: (0,     1)      SouthWest: (−√3/2,  1/2)
+East:      (1,    0)       West:      (−1,    0)
+NorthEast: (1/2, −√3/2)    NorthWest: (−1/2, −√3/2)
+SouthEast: (1/2,  √3/2)    SouthWest: (−1/2,  √3/2)
 ```
 
 Wind vectors from the wind field are expressed in the same frame so

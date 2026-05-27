@@ -48,7 +48,7 @@ impl fmt::Display for Coord {
 
 // ------------- Directions -------------
 
-/// The six directions on a flat-top hexagonal grid.
+/// The six directions on a pointy-top hexagonal grid.
 ///
 /// Directions are named by compass point. On a cylindrical map,
 /// [`East`](Direction::East) and [`West`](Direction::West) wrap; the
@@ -59,13 +59,13 @@ pub enum Direction {
     East,
     /// -q, same r.
     West,
-    /// same q, -r.
+    /// +q, -r.
     NorthEast,
-    /// -q, -r.
+    /// same q, -r.
     NorthWest,
     /// same q, +r.
     SouthEast,
-    /// +q, +r.
+    /// -q, +r.
     SouthWest,
 }
 

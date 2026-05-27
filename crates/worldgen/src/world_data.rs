@@ -7,7 +7,7 @@
 //!
 //! Sub-structures are added in pipeline order as each stage lands.
 
-use coords::{Coord, MapBounds};
+use coords::{Coord, Direction, MapBounds};
 
 use crate::Field;
 
@@ -162,8 +162,8 @@ pub struct TectonicData {
     /// given `(params, seed)` but not geographically sorted.
     pub seeds: Vec<Coord>,
 
-    /// Per-tile plate assignment produced by noise-perturbed Voronoi
-    /// partition (steps 2–3).
+    /// Per-tile plate assignment produced by organic flood-fill growth
+    /// from plate seeds (step 2).
     ///
     /// Each cell holds the [`PlateId`] of the plate that owns the tile.
     /// The value is an index into [`Self::seeds`] and [`Self::plates`].
@@ -280,6 +280,79 @@ impl ClimateData {
     }
 }
 
+// ------------- Hydrology sub-structure -------------
+
+/// Size category assigned to tiles whose accumulated flow forms a river.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RiverSize {
+    /// Small river source or tributary.
+    Creek,
+    /// Established river channel.
+    River,
+    /// High-flow trunk river.
+    MajorRiver,
+}
+
+/// Data produced by the hydrology stage (Stage 3.3, design §1.11).
+///
+/// The stage consumes tectonic elevation and climate precipitation, then
+/// produces drainage directions, lakes, rivers, floodplains, canyons,
+/// canyon walls, and a temporary post-hydrology height-level copy.
+#[derive(Debug, Clone)]
+pub struct HydrologyData {
+    /// Per-tile downstream flow direction.
+    ///
+    /// `None` means the tile is a terminal: ocean, coast, or lake.
+    pub flow_direction: Field<Option<Direction>>,
+
+    /// Normalised precipitation-weighted flow accumulation.
+    ///
+    /// Values are scaled to `[0.0, 1.0]` by the stage-wide maximum so
+    /// river thresholds remain map-size independent.
+    pub flow_accumulation: Field<f32>,
+
+    /// Tiles marked as inland lakes by basin resolution.
+    pub is_lake: Field<bool>,
+
+    /// River classification for each tile, if accumulated flow crosses
+    /// the configured river threshold.
+    pub river_size: Field<Option<RiverSize>>,
+
+    /// Tiles adjacent to river channels and close enough in elevation
+    /// to be treated as floodplains.
+    pub is_floodplain: Field<bool>,
+
+    /// River tiles lowered by the canyon carving pass.
+    pub is_canyon: Field<bool>,
+
+    /// Tiles flanking carved canyons.
+    pub is_canyon_wall: Field<bool>,
+
+    /// Temporary post-hydrology height-level field.
+    ///
+    /// See ADR-0012. This duplicates [`TectonicData::height_level`]
+    /// during hydrology and biome tuning so debug output can compare
+    /// pre- and post-hydrology elevation classes.
+    pub height_level: Field<u8>,
+}
+
+impl HydrologyData {
+    /// Constructs an empty [`HydrologyData`] for the given map bounds.
+    #[must_use]
+    pub fn empty(bounds: MapBounds) -> Self {
+        Self {
+            flow_direction: Field::filled(bounds, None),
+            flow_accumulation: Field::filled(bounds, 0.0),
+            is_lake: Field::filled(bounds, false),
+            river_size: Field::filled(bounds, None),
+            is_floodplain: Field::filled(bounds, false),
+            is_canyon: Field::filled(bounds, false),
+            is_canyon_wall: Field::filled(bounds, false),
+            height_level: Field::filled(bounds, 0),
+        }
+    }
+}
+
 // ------------- Top-level output -------------
 
 /// The finalized output of the generation pipeline, consumed by the
@@ -289,7 +362,7 @@ impl ClimateData {
 ///
 /// - Stage 3.1 (tectonics) → [`TectonicData`]
 /// - Stage 3.2 (climate) → [`ClimateData`]
-/// - Stage 3.3 (hydrology) → `HydrologyData` (not yet added)
+/// - Stage 3.3 (hydrology) → [`HydrologyData`]
 /// - Stage 3.4 (biomes) → `BiomeData` (not yet added)
 /// - Stage 3.5 (resources) → `ResourceData` (not yet added)
 /// - Stage 3.6 (starting positions) → `Vec<Coord>` (not yet added)
@@ -307,6 +380,9 @@ pub struct WorldData {
 
     /// Output of the climate stage (design §1.10).
     pub climate: ClimateData,
+
+    /// Output of the hydrology stage (design §1.11).
+    pub hydrology: HydrologyData,
 }
 
 impl WorldData {
@@ -318,6 +394,7 @@ impl WorldData {
             bounds,
             tectonics: TectonicData::empty(bounds),
             climate: ClimateData::empty(bounds),
+            hydrology: HydrologyData::empty(bounds),
         }
     }
 }

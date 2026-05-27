@@ -132,6 +132,7 @@ pub(crate) fn run(args: &SweepArgs) -> Result<()> {
             output::write_world_outputs(
                 &world.tectonics,
                 &world.climate,
+                &world.hydrology,
                 &output_dir,
                 &label,
                 args.hex_size,
@@ -179,6 +180,7 @@ fn linspace(min: f64, max: f64, steps: usize) -> Vec<f64> {
 pub(crate) fn set_param(tuning: &mut TuningParams, name: &str, value: f64) -> Result<()> {
     let t = &mut tuning.tectonics;
     let c = &mut tuning.climate;
+    let h = &mut tuning.hydrology;
     match name {
         // ---------- TectonicsParams ----------
         // Integer fields — round before casting.
@@ -242,6 +244,14 @@ pub(crate) fn set_param(tuning: &mut TuningParams, name: &str, value: f64) -> Re
         "moisture_cap" => c.moisture_cap = value as f32,
         "diffusion_rate" => c.diffusion_rate = value as f32,
 
+        // ---------- HydrologyParams ----------
+        "lake_basin_area_threshold" => h.lake_basin_area_threshold = value.round() as u32,
+        "river_flow_threshold" => h.river_flow_threshold = value as f32,
+        "major_river_flow_threshold" => h.major_river_flow_threshold = value as f32,
+        "floodplain_elevation_tolerance" => h.floodplain_elevation_tolerance = value as f32,
+        "canyon_flow_slope_threshold" => h.canyon_flow_slope_threshold = value as f32,
+        "canyon_depth" => h.canyon_depth = value.round() as u8,
+
         _ => anyhow::bail!(
             "unknown TuningParams field: `{name}`\n\
              Tectonics: target_plate_count, motion_magnitude_min, motion_magnitude_max, \
@@ -258,7 +268,10 @@ pub(crate) fn set_param(tuning: &mut TuningParams, name: &str, value: f64) -> Re
              iteration_count_factor, iteration_count_min, base_precipitation_rate, \
              max_precipitation_fraction, temp_capacity_offset, temp_capacity_scale, \
              orographic_factor, coastal_moisture_factor, evapotranspiration_rate, \
-             moisture_cap, diffusion_rate"
+             moisture_cap, diffusion_rate\n\
+             Hydrology: lake_basin_area_threshold, river_flow_threshold, \
+             major_river_flow_threshold, floodplain_elevation_tolerance, \
+             canyon_flow_slope_threshold, canyon_depth"
         ),
     }
     Ok(())

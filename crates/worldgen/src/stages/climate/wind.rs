@@ -129,8 +129,8 @@ fn wind_magnitude(wind: [f32; 2]) -> f32 {
 
 /// The six hex neighbour unit vectors in the hex Cartesian frame.
 ///
-/// Computed from the axial-to-Cartesian formula for flat-top hexes:
-/// `x = 3/2·q`, `y = √3/2·q + √3·r`. Each vector has magnitude √3
+/// Computed from the axial-to-Cartesian formula for pointy-top hexes:
+/// `x = √3·(q + r/2)`, `y = 3/2·r`. Each vector has magnitude √3
 /// before normalisation. After normalisation the vectors are spaced
 /// exactly 60° apart.
 ///
@@ -140,18 +140,18 @@ fn wind_magnitude(wind: [f32; 2]) -> f32 {
 /// Used by the advection kernel to project wind onto each outflow
 /// direction.
 pub(crate) const HEX_UNIT_VECTORS: [[f32; 2]; 6] = [
-    // East (+1, 0): Cartesian (3/2, √3/2) / √3 = (√3/2, 1/2)
-    [0.866_025_4, 0.5],
-    // West (−1, 0): Cartesian (−3/2, −√3/2) / √3 = (−√3/2, −1/2)
-    [-0.866_025_4, -0.5],
-    // NorthEast (+1, −1): Cartesian (3/2, −√3/2) / √3 = (√3/2, −1/2)
-    [0.866_025_4, -0.5],
-    // NorthWest (0, −1): Cartesian (0, −√3) / √3 = (0, −1)
-    [0.0, -1.0],
-    // SouthEast (0, +1): Cartesian (0, √3) / √3 = (0, 1)
-    [0.0, 1.0],
-    // SouthWest (−1, +1): Cartesian (−3/2, √3/2) / √3 = (−√3/2, 1/2)
-    [-0.866_025_4, 0.5],
+    // East (+1, 0): Cartesian (√3, 0) / √3 = (1, 0)
+    [1.0, 0.0],
+    // West (−1, 0): Cartesian (−√3, 0) / √3 = (−1, 0)
+    [-1.0, 0.0],
+    // NorthEast (+1, −1): Cartesian (√3/2, −3/2) / √3 = (1/2, −√3/2)
+    [0.5, -0.866_025_4],
+    // NorthWest (0, −1): Cartesian (−√3/2, −3/2) / √3 = (−1/2, −√3/2)
+    [-0.5, -0.866_025_4],
+    // SouthEast (0, +1): Cartesian (√3/2, 3/2) / √3 = (1/2, √3/2)
+    [0.5, 0.866_025_4],
+    // SouthWest (−1, +1): Cartesian (−√3/2, 3/2) / √3 = (−1/2, √3/2)
+    [-0.5, 0.866_025_4],
 ];
 
 #[cfg(test)]

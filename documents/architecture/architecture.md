@@ -7,7 +7,7 @@ It is updated at each stage gate as new structure is added.
 For *why* the architecture is this way, see `docs/design/overview.md`.
 For *when* decisions were made, see `documents/adr/`.
 
-**Current stage:** Stage 3.1 complete. Stage 3.2 (climate) next.
+**Current stage:** Stage 3.2 complete. Stage 3.3 (hydrology) next.
 
 ---
 
@@ -52,7 +52,8 @@ resources, starting positions. Takes a seed and [`WorldParams`],
 produces [`WorldData`]. Runs standalone (used by both tools) and is
 loaded by `game` at world creation time.
 
-Stage 3.1 (tectonics) is complete. Stage 3.2 and beyond are next.
+Stage 3.1 (tectonics) and Stage 3.2 (climate) are complete. Stage 3.3
+(hydrology) is next.
 
 `TectonicsParams` (and all `WorldParams` tuning structs) derive
 `serde::Serialize` / `serde::Deserialize` so they can be loaded from

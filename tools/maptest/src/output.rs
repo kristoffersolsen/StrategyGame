@@ -14,10 +14,10 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use tracing::info;
 use worldgen::{
-    BoundaryType, ClimateData, Field, TectonicData,
+    BoundaryType, ClimateData, Direction, Field, HydrologyData, RiverSize, TectonicData,
     debug_viz::{
-        BoundaryCmap, Categorical, Grayscale, HeightLevelCmap, Viridis, dump_field_hex,
-        dump_field_pixels, dump_field_with_seed_overlay,
+        BoundaryCmap, Categorical, Colormap, Grayscale, HeightLevelCmap, Viridis, dump_field_hex,
+        dump_field_pixels, dump_field_with_seed_overlay, dump_rgb_field_hex,
     },
 };
 
@@ -36,6 +36,13 @@ pub(crate) const SUBDIR_MOISTURE: &str = "moisture";
 pub(crate) const SUBDIR_PRECIPITATION_HEX: &str = "precipitation_hex";
 pub(crate) const SUBDIR_PRECIPITATION_LOG: &str = "precipitation_log";
 pub(crate) const SUBDIR_PRECIPITATION_CSV: &str = "precipitation_csv";
+pub(crate) const SUBDIR_FLOW_DIRECTION: &str = "flow_direction";
+pub(crate) const SUBDIR_FLOW_ACCUMULATION: &str = "flow_accumulation";
+pub(crate) const SUBDIR_LAKES: &str = "lakes";
+pub(crate) const SUBDIR_RIVERS: &str = "rivers";
+pub(crate) const SUBDIR_FLOODPLAINS: &str = "floodplains";
+pub(crate) const SUBDIR_CANYONS: &str = "canyons";
+pub(crate) const SUBDIR_HYDROLOGY_OVERLAY: &str = "hydrology_overlay";
 
 pub(crate) const ALL_SUBDIRS: &[&str] = &[
     SUBDIR_SEEDS,
@@ -51,6 +58,13 @@ pub(crate) const ALL_SUBDIRS: &[&str] = &[
     SUBDIR_PRECIPITATION_HEX,
     SUBDIR_PRECIPITATION_LOG,
     SUBDIR_PRECIPITATION_CSV,
+    SUBDIR_FLOW_DIRECTION,
+    SUBDIR_FLOW_ACCUMULATION,
+    SUBDIR_LAKES,
+    SUBDIR_RIVERS,
+    SUBDIR_FLOODPLAINS,
+    SUBDIR_CANYONS,
+    SUBDIR_HYDROLOGY_OVERLAY,
 ];
 
 // ------------- Directory preparation -------------
@@ -86,6 +100,7 @@ pub(crate) fn ensure_output_dirs(base_dir: &Path) -> Result<()> {
 pub(crate) fn write_world_outputs(
     tectonics: &TectonicData,
     climate: &ClimateData,
+    hydrology: &HydrologyData,
     base_dir: &Path,
     label: &str,
     hex_size: u32,
@@ -104,7 +119,22 @@ pub(crate) fn write_world_outputs(
     write_precipitation(climate, base_dir, label, hex_size)?;
     write_precipitation_log(climate, base_dir, label, hex_size)?;
     write_precipitation_csv(climate, base_dir, label)?;
+    write_flow_direction(hydrology, base_dir, label, hex_size)?;
+    write_flow_accumulation(hydrology, base_dir, label, hex_size)?;
+    write_lakes(hydrology, base_dir, label, hex_size, land_level_count)?;
+    write_rivers(hydrology, base_dir, label, hex_size)?;
+    write_floodplains(hydrology, base_dir, label)?;
+    write_canyons(hydrology, base_dir, label)?;
+    write_hydrology_overlay(
+        tectonics,
+        hydrology,
+        base_dir,
+        label,
+        hex_size,
+        land_level_count,
+    )?;
     log_climate_stats(tectonics, climate);
+    log_hydrology_stats(hydrology);
     Ok(())
 }
 
@@ -390,6 +420,186 @@ fn write_wind_ns(climate: &ClimateData, base_dir: &Path, label: &str) -> Result<
     .with_context(|| format!("failed to write {}", path.display()))
 }
 
+// ------------- Per-output helpers (hydrology) -------------
+
+fn write_flow_direction(
+    hydrology: &HydrologyData,
+    base_dir: &Path,
+    label: &str,
+    hex_size: u32,
+) -> Result<()> {
+    let path = base_dir
+        .join(SUBDIR_FLOW_DIRECTION)
+        .join(format!("{label}.png"));
+    dump_field_hex(
+        &hydrology.flow_direction,
+        &path,
+        flow_direction_to_f32,
+        &Categorical,
+        hex_size,
+    )
+    .with_context(|| format!("failed to write {}", path.display()))
+}
+
+fn write_flow_accumulation(
+    hydrology: &HydrologyData,
+    base_dir: &Path,
+    label: &str,
+    hex_size: u32,
+) -> Result<()> {
+    let max_log = hydrology
+        .flow_accumulation
+        .iter()
+        .copied()
+        .map(|v| (v + 1.0).ln())
+        .fold(0.0_f32, f32::max);
+    let to_f32 = move |v: f32| {
+        if max_log > 0.0 {
+            (v + 1.0).ln() / max_log
+        } else {
+            0.0
+        }
+    };
+
+    let path = base_dir
+        .join(SUBDIR_FLOW_ACCUMULATION)
+        .join(format!("{label}.png"));
+    dump_field_hex(
+        &hydrology.flow_accumulation,
+        &path,
+        to_f32,
+        &Viridis,
+        hex_size,
+    )
+    .with_context(|| format!("failed to write {}", path.display()))
+}
+
+fn write_lakes(
+    hydrology: &HydrologyData,
+    base_dir: &Path,
+    label: &str,
+    hex_size: u32,
+    land_level_count: u8,
+) -> Result<()> {
+    let path = base_dir.join(SUBDIR_LAKES).join(format!("{label}.png"));
+    dump_field_hex(
+        &hydrology.height_level,
+        &path,
+        |level| {
+            if level == 1 { 0.0 } else { f32::from(level) }
+        },
+        &HeightLevelCmap { land_level_count },
+        hex_size,
+    )
+    .with_context(|| format!("failed to write {}", path.display()))
+}
+
+fn write_rivers(
+    hydrology: &HydrologyData,
+    base_dir: &Path,
+    label: &str,
+    hex_size: u32,
+) -> Result<()> {
+    let path = base_dir.join(SUBDIR_RIVERS).join(format!("{label}.png"));
+    dump_field_hex(
+        &hydrology.river_size,
+        &path,
+        river_size_to_f32,
+        &Categorical,
+        hex_size,
+    )
+    .with_context(|| format!("failed to write {}", path.display()))
+}
+
+fn write_floodplains(hydrology: &HydrologyData, base_dir: &Path, label: &str) -> Result<()> {
+    let path = base_dir
+        .join(SUBDIR_FLOODPLAINS)
+        .join(format!("{label}.png"));
+    dump_field_pixels(
+        &hydrology.is_floodplain,
+        &path,
+        |v| if v { 1.0 } else { 0.0 },
+        &Grayscale,
+    )
+    .with_context(|| format!("failed to write {}", path.display()))
+}
+
+fn write_canyons(hydrology: &HydrologyData, base_dir: &Path, label: &str) -> Result<()> {
+    let canyon_overlay = Field::from_fn(hydrology.is_canyon.bounds(), |coord| {
+        if hydrology.is_canyon[coord] {
+            2_u8
+        } else {
+            u8::from(hydrology.is_canyon_wall[coord])
+        }
+    });
+    let path = base_dir.join(SUBDIR_CANYONS).join(format!("{label}.png"));
+    dump_field_pixels(&canyon_overlay, &path, f32::from, &Categorical)
+        .with_context(|| format!("failed to write {}", path.display()))
+}
+
+fn write_hydrology_overlay(
+    tectonics: &TectonicData,
+    hydrology: &HydrologyData,
+    base_dir: &Path,
+    label: &str,
+    hex_size: u32,
+    land_level_count: u8,
+) -> Result<()> {
+    let overlay = hydrology_overlay_field(tectonics, hydrology, land_level_count);
+    let path = base_dir
+        .join(SUBDIR_HYDROLOGY_OVERLAY)
+        .join(format!("{label}.png"));
+    dump_rgb_field_hex(&overlay, &path, hex_size)
+        .with_context(|| format!("failed to write {}", path.display()))
+}
+
+fn hydrology_overlay_field(
+    tectonics: &TectonicData,
+    hydrology: &HydrologyData,
+    land_level_count: u8,
+) -> Field<[u8; 3]> {
+    let height_cmap = HeightLevelCmap { land_level_count };
+    Field::from_fn(tectonics.height_level.bounds(), |coord| {
+        if hydrology.is_lake[coord] {
+            LAKE_COLOR
+        } else if hydrology.is_canyon[coord] || hydrology.is_canyon_wall[coord] {
+            CANYON_COLOR
+        } else if hydrology.river_size[coord] == Some(RiverSize::MajorRiver) {
+            MAJOR_RIVER_COLOR
+        } else if hydrology.river_size[coord].is_some() {
+            RIVER_COLOR
+        } else {
+            height_cmap.color(f32::from(hydrology.height_level[coord]))
+        }
+    })
+}
+
+fn flow_direction_to_f32(direction: Option<Direction>) -> f32 {
+    match direction {
+        None => 0.0,
+        Some(Direction::East) => 1.0,
+        Some(Direction::SouthEast) => 2.0,
+        Some(Direction::SouthWest) => 3.0,
+        Some(Direction::West) => 4.0,
+        Some(Direction::NorthWest) => 5.0,
+        Some(Direction::NorthEast) => 6.0,
+    }
+}
+
+fn river_size_to_f32(river_size: Option<RiverSize>) -> f32 {
+    match river_size {
+        None => 0.0,
+        Some(RiverSize::Creek) => 1.0,
+        Some(RiverSize::River) => 2.0,
+        Some(RiverSize::MajorRiver) => 3.0,
+    }
+}
+
+const LAKE_COLOR: [u8; 3] = [0, 170, 170];
+const RIVER_COLOR: [u8; 3] = [255, 105, 180];
+const MAJOR_RIVER_COLOR: [u8; 3] = [130, 70, 210];
+const CANYON_COLOR: [u8; 3] = [140, 85, 35];
+
 // Tile counts fit comfortably in f32 (max ~2 million for a huge map).
 #[allow(clippy::cast_precision_loss)]
 fn log_climate_stats(tectonics: &TectonicData, climate: &ClimateData) {
@@ -457,5 +667,38 @@ fn log_climate_stats(tectonics: &TectonicData, climate: &ClimateData) {
         moisture_land_mean,
         wind_ns_rms,
         "climate stats"
+    );
+}
+
+fn log_hydrology_stats(hydrology: &HydrologyData) {
+    let lake_count = hydrology.is_lake.iter().filter(|&&v| v).count();
+    let creek_count = hydrology
+        .river_size
+        .iter()
+        .filter(|&&v| v == Some(RiverSize::Creek))
+        .count();
+    let river_count = hydrology
+        .river_size
+        .iter()
+        .filter(|&&v| v == Some(RiverSize::River))
+        .count();
+    let major_river_count = hydrology
+        .river_size
+        .iter()
+        .filter(|&&v| v == Some(RiverSize::MajorRiver))
+        .count();
+    let floodplain_count = hydrology.is_floodplain.iter().filter(|&&v| v).count();
+    let canyon_count = hydrology.is_canyon.iter().filter(|&&v| v).count();
+    let canyon_wall_count = hydrology.is_canyon_wall.iter().filter(|&&v| v).count();
+
+    info!(
+        lake_count,
+        creek_count,
+        river_count,
+        major_river_count,
+        floodplain_count,
+        canyon_count,
+        canyon_wall_count,
+        "hydrology stats"
     );
 }

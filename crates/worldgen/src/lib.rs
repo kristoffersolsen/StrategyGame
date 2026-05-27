@@ -55,17 +55,18 @@ pub mod rng;
 mod stages;
 mod world_data;
 
+pub use coords::Direction;
 pub use error::GenerationError;
 pub use field::Field;
 pub use params::{
     AdvancedParams, BasicParams, CFL_MAX_WIND_AMPLITUDE, ClimateBand, ClimateParams,
-    MAX_DETAIL_NOISE_OCTAVES, MAX_LAND_LEVEL_COUNT, MAX_TARGET_PLATE_COUNT,
+    HydrologyParams, MAX_DETAIL_NOISE_OCTAVES, MAX_LAND_LEVEL_COUNT, MAX_TARGET_PLATE_COUNT,
     MIN_DETAIL_NOISE_OCTAVES, MIN_LAND_LEVEL_COUNT, MIN_TARGET_PLATE_COUNT, MapArchetype, MapSize,
     ResourceAbundance, TectonicsParams, TuningParams, WorldAge, WorldParams,
 };
 pub use world_data::{
-    BoundaryType, ClimateData, MineralCharacter, MotionVector, Plate, PlateId, PlateType,
-    TectonicData, WorldData,
+    BoundaryType, ClimateData, HydrologyData, MineralCharacter, MotionVector, Plate, PlateId,
+    PlateType, RiverSize, TectonicData, WorldData,
 };
 
 use coords::MapBounds;
@@ -114,6 +115,14 @@ pub fn generate_world(params: &WorldParams) -> Result<WorldData, GenerationError
         &world.tectonics,
         &params.tuning.climate,
         &mut climate_rng,
+    );
+
+    // Stage 3.3: hydrology.
+    world.hydrology = stages::hydrology::run(
+        bounds,
+        &world.tectonics,
+        &world.climate,
+        &params.tuning.hydrology,
     );
 
     Ok(world)
