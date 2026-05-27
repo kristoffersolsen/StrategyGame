@@ -59,14 +59,14 @@ pub use coords::Direction;
 pub use error::GenerationError;
 pub use field::Field;
 pub use params::{
-    AdvancedParams, BasicParams, CFL_MAX_WIND_AMPLITUDE, ClimateBand, ClimateParams,
+    AdvancedParams, BasicParams, BiomeParams, CFL_MAX_WIND_AMPLITUDE, ClimateBand, ClimateParams,
     HydrologyParams, MAX_DETAIL_NOISE_OCTAVES, MAX_LAND_LEVEL_COUNT, MAX_TARGET_PLATE_COUNT,
     MIN_DETAIL_NOISE_OCTAVES, MIN_LAND_LEVEL_COUNT, MIN_TARGET_PLATE_COUNT, MapArchetype, MapSize,
     ResourceAbundance, TectonicsParams, TuningParams, WorldAge, WorldParams,
 };
 pub use world_data::{
-    BoundaryType, ClimateData, HydrologyData, MineralCharacter, MotionVector, Plate, PlateId,
-    PlateType, RiverSize, TectonicData, WorldData,
+    Biome, BiomeData, BoundaryType, ClimateData, HydrologyData, MineralCharacter, MotionVector,
+    Plate, PlateId, PlateType, RiverSize, TectonicData, WorldData,
 };
 
 use coords::MapBounds;
@@ -101,6 +101,8 @@ pub fn generate_world(params: &WorldParams) -> Result<WorldData, GenerationError
     let (width, height) = params.basic.map_size.dimensions();
     let bounds = MapBounds::new(width, height);
     let master = MasterRng::new(params.seed);
+    let biome_table =
+        stages::biomes::BiomeTable::load(&params.biome_table_path, &params.tuning.biomes)?;
 
     let mut world = WorldData::new(bounds);
 
@@ -123,6 +125,18 @@ pub fn generate_world(params: &WorldParams) -> Result<WorldData, GenerationError
         &world.tectonics,
         &world.climate,
         &params.tuning.hydrology,
+    );
+
+    // Stage 3.4: biomes.
+    let mut biome_rng = master.fork(StageId::Biomes);
+    world.biomes = stages::biomes::run(
+        bounds,
+        &world.climate,
+        &world.hydrology,
+        &params.tuning.biomes,
+        params.tuning.tectonics.land_level_count + 2,
+        &biome_table,
+        &mut biome_rng,
     );
 
     Ok(world)

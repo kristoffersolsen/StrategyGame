@@ -10,7 +10,9 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use rayon::prelude::*;
 use tracing::info;
-use worldgen::{BasicParams, TectonicsParams, TuningParams, WorldParams, generate_world};
+use worldgen::{
+    BasicParams, BiomeParams, TectonicsParams, TuningParams, WorldParams, generate_world,
+};
 
 use crate::output;
 
@@ -130,9 +132,7 @@ pub(crate) fn run(args: &SweepArgs) -> Result<()> {
 
             let label = format!("v{val:.4}_{seed}");
             output::write_world_outputs(
-                &world.tectonics,
-                &world.climate,
-                &world.hydrology,
+                &world,
                 &output_dir,
                 &label,
                 args.hex_size,
@@ -222,6 +222,26 @@ fn set_tectonics_param(t: &mut TectonicsParams, name: &str, value: f64) -> Resul
     Ok(true)
 }
 
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss
+)]
+fn set_biome_param(biomes: &mut BiomeParams, name: &str, value: f64) -> Result<bool> {
+    match name {
+        "hydrology_override_strength" => biomes.hydrology_override_strength = value as f32,
+        "smoothing_passes" => biomes.smoothing_passes = value.round() as u8,
+        "forest_noise_frequency" => biomes.forest_noise_frequency = value as f32,
+        "forest_noise_amplitude" => biomes.forest_noise_amplitude = value as f32,
+        "temperature_bin_count" | "moisture_bin_count" => anyhow::bail!(
+            "`{name}` is coupled to the biome table file; edit the table and params together \
+             instead of sweeping it as a scalar"
+        ),
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
 /// Sets a single scalar field of `tuning` by its `snake_case` name.
 ///
 /// Vec and bool fields cannot be swept as scalars; provide them via a
@@ -238,6 +258,9 @@ fn set_tectonics_param(t: &mut TectonicsParams, name: &str, value: f64) -> Resul
 )]
 pub(crate) fn set_param(tuning: &mut TuningParams, name: &str, value: f64) -> Result<()> {
     if set_tectonics_param(&mut tuning.tectonics, name, value)? {
+        return Ok(());
+    }
+    if set_biome_param(&mut tuning.biomes, name, value)? {
         return Ok(());
     }
 
@@ -297,7 +320,9 @@ pub(crate) fn set_param(tuning: &mut TuningParams, name: &str, value: f64) -> Re
              moisture_cap, diffusion_rate\n\
              Hydrology: lake_basin_area_threshold, river_flow_threshold, \
              major_river_flow_threshold, floodplain_elevation_tolerance, \
-             canyon_flow_slope_threshold, canyon_depth"
+             canyon_flow_slope_threshold, canyon_depth\n\
+             Biomes: hydrology_override_strength, smoothing_passes, \
+             forest_noise_frequency, forest_noise_amplitude"
         ),
     }
     Ok(())

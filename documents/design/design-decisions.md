@@ -448,6 +448,12 @@ Ocean, coast, and lake are terrain types determined earlier (elevation + hydrolo
 
 **Lookup table format:** RON config file, designer-editable. Discretized bins of (temperature, moisture) → biome. Continuous input fields, discrete output classification.
 
+**Implementation note:** Stage 3.4 stores the table at
+`assets/worldgen/biome_table.ron` and validates full grid coverage at
+pipeline startup. `BiomeParams` owns the bin counts; the table must
+match those counts exactly. Hydrology overrides live in the table as a
+deterministic `BTreeMap<Biome, Biome>`. See ADR-0016.
+
 **Rationale:** Whittaker classification is the ecological standard and produces realistic biome distributions automatically from the temperature/moisture fields already computed. Most of the complexity was in climate; biome is the readout.
 
 **Risks:**

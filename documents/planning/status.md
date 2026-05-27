@@ -1,8 +1,8 @@
 # Implementation Status
 
 **Date:** 2026-05-27  
-**Stage:** 3.3 Hydrology — **complete**  
-**Next action:** Stage 3.4 — Biomes (design §1.12)
+**Stage:** 3.4 Biomes — **complete**  
+**Next action:** Stage 3.5 — Resource placement (design §1.13)
 
 ---
 
@@ -15,7 +15,7 @@ workspace with four library/game crates (`coords`, `worldgen`, `game`,
 covers the state of the `worldgen` crate and the generation pipeline
 only.
 
-Stages 0–3.3 are complete. Stage 3.4 (biomes) is next.
+Stages 0–3.4 are complete. Stage 3.5 (resource placement) is next.
 
 ---
 
@@ -124,9 +124,7 @@ carried forward:
 
 ---
 
-## What is next
-
-**Stage 3.4 — Biomes** (design doc §1.12)
+### Stage 3.4 — Biomes (complete)
 
 Biome assignment is a readout stage: every land tile is classified using
 the temperature and moisture fields from Stage 3.2, with overrides
@@ -141,8 +139,8 @@ startup must reject any table that leaves a reachable `(temperature_bin,
 moisture_bin)` combination unassigned, making table coverage a hard
 load-time invariant rather than a runtime surprise.
 
-See `documents/planning/add-biomes-pipeline.md` for how to extend the
-biome set after this stage lands.
+See `documents/pipelines/add_biomes_pipeline.md` for how to extend the
+biome set.
 
 ### Key decisions carried into implementation
 
@@ -185,6 +183,30 @@ biome set after this stage lands.
   `Biome` derives `Ord` so iteration order is deterministic without
   sorting. `HashMap` is not used; see the determinism rules in
   `crates/worldgen/src/lib.rs`.
+
+### Gate: Stage 3.4 complete
+
+- All 7 steps implemented; `BiomeData` populated by `generate_world`.
+- `maptest run` and `mapdump` produce 2 new PNGs: categorical biome map
+  and forest density field.
+- Categorical colormap assigns a visually separable color to each of
+  the 6 biomes.
+- Default table validates as full 8×8 coverage at pipeline startup.
+- Hydrology overrides are wired for river, floodplain, and lake-adjacent
+  tiles with default `hydrology_override_strength = 0.8`.
+- Determinism test extended to cover `biome` and `forest_density`
+  fields; reference hash updated.
+- ADR-0016 written and accepted.
+- `documents/pipelines/add_biomes_pipeline.md` exists.
+
+## What is next
+
+**Stage 3.5 — Resource placement** (design doc §1.13)
+
+Geological placement using plate mineral character, biome filtering,
+clustering for luxuries, and scattered placement for strategics.
+
+<!-- Historical Stage 3.4 implementation roster follows for reference. -->
 
 ### Step roster
 
@@ -258,7 +280,7 @@ bin counts agree with the loaded table.
 `StageRng` with `StageId::Biomes`.
 
 The biome table is a data asset, not a params struct. Its path lives in
-`WorldParams`; the default points to the committed asset. See ADR-0008.
+`WorldParams`; the default points to the committed asset. See ADR-0016.
 
 ### Parameters
 

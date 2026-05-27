@@ -14,10 +14,11 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use tracing::info;
 use worldgen::{
-    BoundaryType, ClimateData, Direction, Field, HydrologyData, RiverSize, TectonicData,
+    Biome, BiomeData, BoundaryType, ClimateData, Direction, Field, HydrologyData, RiverSize,
+    TectonicData, WorldData,
     debug_viz::{
-        BoundaryCmap, Categorical, Colormap, Grayscale, HeightLevelCmap, Viridis, dump_field_hex,
-        dump_field_pixels, dump_field_with_seed_overlay, dump_rgb_field_hex,
+        BiomeCmap, BoundaryCmap, Categorical, Colormap, Grayscale, HeightLevelCmap, Viridis,
+        dump_field_hex, dump_field_pixels, dump_field_with_seed_overlay, dump_rgb_field_hex,
     },
 };
 
@@ -43,6 +44,8 @@ pub(crate) const SUBDIR_RIVERS: &str = "rivers";
 pub(crate) const SUBDIR_FLOODPLAINS: &str = "floodplains";
 pub(crate) const SUBDIR_CANYONS: &str = "canyons";
 pub(crate) const SUBDIR_HYDROLOGY_OVERLAY: &str = "hydrology_overlay";
+pub(crate) const SUBDIR_BIOMES: &str = "biomes";
+pub(crate) const SUBDIR_FOREST_DENSITY: &str = "forest_density";
 
 pub(crate) const ALL_SUBDIRS: &[&str] = &[
     SUBDIR_SEEDS,
@@ -65,6 +68,8 @@ pub(crate) const ALL_SUBDIRS: &[&str] = &[
     SUBDIR_FLOODPLAINS,
     SUBDIR_CANYONS,
     SUBDIR_HYDROLOGY_OVERLAY,
+    SUBDIR_BIOMES,
+    SUBDIR_FOREST_DENSITY,
 ];
 
 // ------------- Directory preparation -------------
@@ -98,14 +103,17 @@ pub(crate) fn ensure_output_dirs(base_dir: &Path) -> Result<()> {
 ///
 /// Returns an error if any image cannot be written to disk.
 pub(crate) fn write_world_outputs(
-    tectonics: &TectonicData,
-    climate: &ClimateData,
-    hydrology: &HydrologyData,
+    world: &WorldData,
     base_dir: &Path,
     label: &str,
     hex_size: u32,
     land_level_count: u8,
 ) -> Result<()> {
+    let tectonics = &world.tectonics;
+    let climate = &world.climate;
+    let hydrology = &world.hydrology;
+    let biomes = &world.biomes;
+
     write_seeds(tectonics, base_dir, label)?;
     write_plate_map(tectonics, base_dir, label, hex_size)?;
     write_boundary_types(tectonics, base_dir, label)?;
@@ -133,8 +141,11 @@ pub(crate) fn write_world_outputs(
         hex_size,
         land_level_count,
     )?;
+    write_biomes(biomes, base_dir, label, hex_size)?;
+    write_forest_density(biomes, base_dir, label)?;
     log_climate_stats(tectonics, climate);
     log_hydrology_stats(hydrology);
+    log_biome_stats(biomes);
     Ok(())
 }
 
@@ -595,6 +606,34 @@ fn river_size_to_f32(river_size: Option<RiverSize>) -> f32 {
     }
 }
 
+// ------------- Per-output helpers (biomes) -------------
+
+fn write_biomes(biomes: &BiomeData, base_dir: &Path, label: &str, hex_size: u32) -> Result<()> {
+    let path = base_dir.join(SUBDIR_BIOMES).join(format!("{label}.png"));
+    dump_field_hex(&biomes.biome, &path, biome_to_f32, &BiomeCmap, hex_size)
+        .with_context(|| format!("failed to write {}", path.display()))
+}
+
+fn write_forest_density(biomes: &BiomeData, base_dir: &Path, label: &str) -> Result<()> {
+    let path = base_dir
+        .join(SUBDIR_FOREST_DENSITY)
+        .join(format!("{label}.png"));
+    dump_field_pixels(&biomes.forest_density, &path, |v| v, &Viridis)
+        .with_context(|| format!("failed to write {}", path.display()))
+}
+
+fn biome_to_f32(biome: Option<Biome>) -> f32 {
+    match biome {
+        None => 0.0,
+        Some(Biome::TropicalRainforest) => 1.0,
+        Some(Biome::TemperateForest) => 2.0,
+        Some(Biome::BorealForest) => 3.0,
+        Some(Biome::Grassland) => 4.0,
+        Some(Biome::Desert) => 5.0,
+        Some(Biome::Tundra) => 6.0,
+    }
+}
+
 const LAKE_COLOR: [u8; 3] = [0, 170, 170];
 const RIVER_COLOR: [u8; 3] = [255, 105, 180];
 const MAJOR_RIVER_COLOR: [u8; 3] = [130, 70, 210];
@@ -700,5 +739,38 @@ fn log_hydrology_stats(hydrology: &HydrologyData) {
         canyon_count,
         canyon_wall_count,
         "hydrology stats"
+    );
+}
+
+fn log_biome_stats(biomes: &BiomeData) {
+    let mut tropical_rainforest_count = 0_usize;
+    let mut temperate_forest_count = 0_usize;
+    let mut boreal_forest_count = 0_usize;
+    let mut grassland_count = 0_usize;
+    let mut desert_count = 0_usize;
+    let mut tundra_count = 0_usize;
+    let mut unassigned_count = 0_usize;
+
+    for &biome in biomes.biome.as_slice() {
+        match biome {
+            None => unassigned_count += 1,
+            Some(Biome::TropicalRainforest) => tropical_rainforest_count += 1,
+            Some(Biome::TemperateForest) => temperate_forest_count += 1,
+            Some(Biome::BorealForest) => boreal_forest_count += 1,
+            Some(Biome::Grassland) => grassland_count += 1,
+            Some(Biome::Desert) => desert_count += 1,
+            Some(Biome::Tundra) => tundra_count += 1,
+        }
+    }
+
+    info!(
+        tropical_rainforest_count,
+        temperate_forest_count,
+        boreal_forest_count,
+        grassland_count,
+        desert_count,
+        tundra_count,
+        unassigned_count,
+        "biome stats"
     );
 }

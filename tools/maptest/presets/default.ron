@@ -115,4 +115,19 @@
         canyon_flow_slope_threshold: 0.25,
         canyon_depth: 1,
     ),
+    biomes: (
+        // Step 2 — Table dimensions. These must match assets/worldgen/biome_table.ron.
+        temperature_bin_count: 8,
+        moisture_bin_count: 8,
+
+        // Step 4 — River, floodplain, and lake-adjacent fertile overrides
+        hydrology_override_strength: 0.8,
+
+        // Step 5 — Optional single-tile-island smoothing
+        smoothing_passes: 0,
+
+        // Step 6 — Forest density feature noise
+        forest_noise_frequency: 0.4,
+        forest_noise_amplitude: 0.6,
+    ),
 )
