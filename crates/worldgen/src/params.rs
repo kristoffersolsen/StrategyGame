@@ -23,6 +23,9 @@
 mod climate;
 pub use climate::{CFL_MAX_WIND_AMPLITUDE, ClimateParams};
 
+mod hydrology;
+pub use hydrology::HydrologyParams;
+
 mod tectonics;
 pub use tectonics::{
     MAX_DETAIL_NOISE_OCTAVES, MAX_LAND_LEVEL_COUNT, MAX_TARGET_PLATE_COUNT,
@@ -296,8 +299,11 @@ pub struct TuningParams {
     /// Knobs consumed by the climate stage (design §1.10).
     #[serde(default)]
     pub climate: ClimateParams,
-    // Hydrology, biomes, resources, and starting-position sub-structs
-    // are added when their stages land.
+    /// Knobs consumed by the hydrology stage (design §1.11).
+    #[serde(default)]
+    pub hydrology: HydrologyParams,
+    // Biomes, resources, and starting-position sub-structs are added
+    // when their stages land.
 }
 
 impl TuningParams {
@@ -310,6 +316,7 @@ impl TuningParams {
         Self {
             tectonics: TectonicsParams::defaults(),
             climate: ClimateParams::defaults(),
+            hydrology: HydrologyParams::defaults(),
         }
     }
 
@@ -322,6 +329,7 @@ impl TuningParams {
     pub fn validate(&self) -> Result<(), GenerationError> {
         self.tectonics.validate()?;
         self.climate.validate()?;
+        self.hydrology.validate()?;
         Ok(())
     }
 
@@ -330,7 +338,9 @@ impl TuningParams {
     /// Used by the achievement gate.
     #[must_use]
     pub fn is_all_default(&self) -> bool {
-        self.tectonics.is_all_default() && self.climate.is_all_default()
+        self.tectonics.is_all_default()
+            && self.climate.is_all_default()
+            && self.hydrology.is_all_default()
     }
 }
 

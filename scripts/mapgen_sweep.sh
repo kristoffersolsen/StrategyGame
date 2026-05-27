@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PARAM=target_plate_count
+#PARAM=target_plate_count
 
 #PARAM=detail_noise_amplitude
 #PARAM=detail_noise_frequency
@@ -18,10 +18,12 @@ PARAM=target_plate_count
 #PARAM=moisture_cap
 #PARAM=wind_amplitude
 
+#PARAM=river_flow_threshold
+PARAM=lake_basin_area_threshold
+#PARAM=major_river_flow_threshold
 
-
-MIN=5
-MAX=25
+MIN=10
+MAX=100
 STEPS=10
 SEEDS=6  # run seeds 1..SEEDS
 

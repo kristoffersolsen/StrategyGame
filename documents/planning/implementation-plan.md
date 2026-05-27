@@ -403,10 +403,9 @@ Tuning targets: rivers reach the sea or designated lakes (no orphan
 flow), lake thresholds produce plausible counts, canyon carving
 produces visible chokepoints without overpopulating.
 
-**Blocker:** Resolve the cliff impassability question (design doc
-§1.4, called out in §1.11). Canyon walls produce delta-2 height
-transitions that need explicit traversability rules. Recommend
-impassable for canyon walls; cleanest gameplay result.
+Cliff impassability blocker resolved by ADR-0012. Canyon walls are an
+explicit application of the design doc §1.4 rule that adjacent height
+delta ≥ 2 is impassable by default.
 
 Tuning integration: add flow accumulation, river, lake, floodplain,
 and canyon outputs to `output.rs` and `mapdump`. Key sweeps: minimum
@@ -598,6 +597,6 @@ If the plan and reality drift, the plan is wrong. Fix it.
 
 ## Status
 
-**Current stage:** Stage 3.2 complete.
+**Current stage:** Stage 3.3 complete.
 
-**Next action:** Begin stage 3.3 — Hydrology.
+**Next action:** Begin stage 3.4 — Biomes.

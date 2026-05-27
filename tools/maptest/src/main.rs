@@ -135,6 +135,7 @@ fn run(args: &RunArgs) -> Result<()> {
         output::write_world_outputs(
             &world.tectonics,
             &world.climate,
+            &world.hydrology,
             &args.output,
             &label,
             args.hex_size,

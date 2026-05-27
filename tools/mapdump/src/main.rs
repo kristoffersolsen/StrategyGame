@@ -45,6 +45,16 @@
 //! - `32_02_wind_px.png` — wind magnitude field.
 //! - `32_06_moisture_px.png` — final steady-state moisture field.
 //! - `32_06_precipitation_px.png` / `32_06_precipitation_hex.png` — total precipitation.
+//!
+//! ## Stage 3.3 — Hydrology
+//!
+//! - `33_01_flow_direction_hex.png` — D6 downstream direction field.
+//! - `33_02_flow_accumulation_hex.png` — log-scale accumulated flow.
+//! - `33_03_lakes_hex.png` — lake tiles.
+//! - `33_04_rivers_hex.png` — river tiers.
+//! - `33_05_floodplains_px.png` — floodplain feature mask.
+//! - `33_06_canyons_px.png` — canyon floor and wall mask.
+//! - `33_07_hydrology_overlay_hex.png` — elevation with lakes, rivers, and canyons.
 
 use std::path::Path;
 use std::path::PathBuf;
@@ -53,11 +63,11 @@ use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use tracing::info;
 use worldgen::{
-    BasicParams, BoundaryType, ClimateData, Field, MapSize, TectonicData, TuningParams,
-    WorldParams,
+    BasicParams, BoundaryType, ClimateData, Direction, Field, HydrologyData, MapSize, RiverSize,
+    TectonicData, TuningParams, WorldParams,
     debug_viz::{
-        BoundaryCmap, Categorical, Grayscale, HeightLevelCmap, Viridis, dump_field_hex,
-        dump_field_pixels, dump_field_with_seed_overlay,
+        BoundaryCmap, Categorical, Colormap, Grayscale, HeightLevelCmap, Viridis, dump_field_hex,
+        dump_field_pixels, dump_field_with_seed_overlay, dump_rgb_field_hex,
     },
     generate_world,
 };
@@ -113,6 +123,13 @@ fn main() -> Result<()> {
     write_tectonics_plates(&world.tectonics, &params, &args.output, args.hex_size)?;
     write_tectonics_elevation_and_levels(&world.tectonics, &params, &args.output, args.hex_size)?;
     write_climate(&world.climate, &args.output, args.hex_size)?;
+    write_hydrology(
+        &world.tectonics,
+        &world.hydrology,
+        &params,
+        &args.output,
+        args.hex_size,
+    )?;
 
     info!("done");
     Ok(())
@@ -461,6 +478,154 @@ fn write_climate(climate: &ClimateData, output: &Path, hex_size: u32) -> Result<
 
     Ok(())
 }
+
+// ------------- Output helpers (hydrology) -------------
+
+fn write_hydrology(
+    tectonics: &TectonicData,
+    hydrology: &HydrologyData,
+    params: &WorldParams,
+    output: &Path,
+    hex_size: u32,
+) -> Result<()> {
+    let flow_direction_path = output.join("33_01_flow_direction_hex.png");
+    info!(path = %flow_direction_path.display(), "writing flow direction PNG");
+    dump_field_hex(
+        &hydrology.flow_direction,
+        &flow_direction_path,
+        flow_direction_to_f32,
+        &Categorical,
+        hex_size,
+    )
+    .with_context(|| format!("failed to write {}", flow_direction_path.display()))?;
+
+    let max_log = hydrology
+        .flow_accumulation
+        .iter()
+        .copied()
+        .map(|v| (v + 1.0).ln())
+        .fold(0.0_f32, f32::max);
+    let flow_to_f32 = move |v: f32| {
+        if max_log > 0.0 {
+            (v + 1.0).ln() / max_log
+        } else {
+            0.0
+        }
+    };
+    let accumulation_path = output.join("33_02_flow_accumulation_hex.png");
+    info!(path = %accumulation_path.display(), "writing flow accumulation PNG");
+    dump_field_hex(
+        &hydrology.flow_accumulation,
+        &accumulation_path,
+        flow_to_f32,
+        &Viridis,
+        hex_size,
+    )
+    .with_context(|| format!("failed to write {}", accumulation_path.display()))?;
+
+    let lakes_path = output.join("33_03_lakes_hex.png");
+    info!(path = %lakes_path.display(), "writing lakes PNG");
+    dump_field_hex(
+        &hydrology.is_lake,
+        &lakes_path,
+        |v| if v { 1.0 } else { 0.0 },
+        &Grayscale,
+        hex_size,
+    )
+    .with_context(|| format!("failed to write {}", lakes_path.display()))?;
+
+    let rivers_path = output.join("33_04_rivers_hex.png");
+    info!(path = %rivers_path.display(), "writing rivers PNG");
+    dump_field_hex(
+        &hydrology.river_size,
+        &rivers_path,
+        river_size_to_f32,
+        &Categorical,
+        hex_size,
+    )
+    .with_context(|| format!("failed to write {}", rivers_path.display()))?;
+
+    let floodplains_path = output.join("33_05_floodplains_px.png");
+    info!(path = %floodplains_path.display(), "writing floodplains PNG");
+    dump_field_pixels(
+        &hydrology.is_floodplain,
+        &floodplains_path,
+        |v| if v { 1.0 } else { 0.0 },
+        &Grayscale,
+    )
+    .with_context(|| format!("failed to write {}", floodplains_path.display()))?;
+
+    let canyon_overlay = Field::from_fn(hydrology.is_canyon.bounds(), |coord| {
+        if hydrology.is_canyon[coord] {
+            2_u8
+        } else {
+            u8::from(hydrology.is_canyon_wall[coord])
+        }
+    });
+    let canyons_path = output.join("33_06_canyons_px.png");
+    info!(path = %canyons_path.display(), "writing canyons PNG");
+    dump_field_pixels(&canyon_overlay, &canyons_path, f32::from, &Categorical)
+        .with_context(|| format!("failed to write {}", canyons_path.display()))?;
+
+    let overlay = hydrology_overlay_field(
+        tectonics,
+        hydrology,
+        params.tuning.tectonics.land_level_count,
+    );
+    let overlay_path = output.join("33_07_hydrology_overlay_hex.png");
+    info!(path = %overlay_path.display(), "writing hydrology overlay PNG");
+    dump_rgb_field_hex(&overlay, &overlay_path, hex_size)
+        .with_context(|| format!("failed to write {}", overlay_path.display()))?;
+
+    Ok(())
+}
+
+fn hydrology_overlay_field(
+    tectonics: &TectonicData,
+    hydrology: &HydrologyData,
+    land_level_count: u8,
+) -> Field<[u8; 3]> {
+    let height_cmap = HeightLevelCmap { land_level_count };
+    Field::from_fn(tectonics.height_level.bounds(), |coord| {
+        if hydrology.is_lake[coord] {
+            LAKE_COLOR
+        } else if hydrology.is_canyon[coord] || hydrology.is_canyon_wall[coord] {
+            CANYON_COLOR
+        } else if hydrology.river_size[coord] == Some(RiverSize::MajorRiver) {
+            MAJOR_RIVER_COLOR
+        } else if hydrology.river_size[coord].is_some() {
+            RIVER_COLOR
+        } else {
+            height_cmap.color(f32::from(hydrology.height_level[coord]))
+        }
+    })
+}
+
+fn flow_direction_to_f32(direction: Option<Direction>) -> f32 {
+    match direction {
+        None => 0.0,
+        Some(Direction::East) => 1.0,
+        Some(Direction::SouthEast) => 2.0,
+        Some(Direction::SouthWest) => 3.0,
+        Some(Direction::West) => 4.0,
+        Some(Direction::NorthWest) => 5.0,
+        Some(Direction::NorthEast) => 6.0,
+    }
+}
+
+fn river_size_to_f32(river_size: Option<RiverSize>) -> f32 {
+    match river_size {
+        None => 0.0,
+        Some(RiverSize::Creek) => 1.0,
+        Some(RiverSize::River) => 2.0,
+        Some(RiverSize::MajorRiver) => 3.0,
+    }
+}
+
+const LAKE_COLOR: [u8; 3] = [0, 170, 170];
+const RIVER_COLOR: [u8; 3] = [255, 105, 180];
+const MAJOR_RIVER_COLOR: [u8; 3] = [130, 70, 210];
+const CANYON_COLOR: [u8; 3] = [140, 85, 35];
 
 // ------------- CLI argument types -------------
 

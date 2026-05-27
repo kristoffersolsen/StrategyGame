@@ -35,7 +35,8 @@
 
 use blake3::Hasher;
 use worldgen::{
-    BasicParams, BoundaryType, Field, MapSize, MineralCharacter, PlateType, WorldParams,
+    BasicParams, BoundaryType, Direction, Field, MapSize, MineralCharacter, PlateType, RiverSize,
+    WorldParams,
     debug_viz::{Grayscale, dump_field_pixels},
     generate_world,
 };
@@ -60,7 +61,7 @@ fn test_params(seed: u64) -> WorldParams {
 fn world_data_hash(params: &WorldParams) -> blake3::Hash {
     let world = generate_world(params).expect("generate_world failed");
     let mut hasher = Hasher::new();
-    hasher.update(b"WorldData:v2");
+    hasher.update(b"WorldData:v3");
     hasher.update(&world.bounds.width().to_le_bytes());
     hasher.update(&world.bounds.height().to_le_bytes());
 
@@ -93,6 +94,27 @@ fn world_data_hash(params: &WorldParams) -> blake3::Hash {
         update_f32(&mut hasher, south);
     }
     update_f32_field(&mut hasher, &world.climate.precipitation);
+
+    for &direction in world.hydrology.flow_direction.as_slice() {
+        update_u8(&mut hasher, direction_tag(direction));
+    }
+    update_f32_field(&mut hasher, &world.hydrology.flow_accumulation);
+    for &is_lake in world.hydrology.is_lake.as_slice() {
+        update_u8(&mut hasher, u8::from(is_lake));
+    }
+    for &river in world.hydrology.river_size.as_slice() {
+        update_u8(&mut hasher, river_tag(river));
+    }
+    for &is_floodplain in world.hydrology.is_floodplain.as_slice() {
+        update_u8(&mut hasher, u8::from(is_floodplain));
+    }
+    for &is_canyon in world.hydrology.is_canyon.as_slice() {
+        update_u8(&mut hasher, u8::from(is_canyon));
+    }
+    for &is_canyon_wall in world.hydrology.is_canyon_wall.as_slice() {
+        update_u8(&mut hasher, u8::from(is_canyon_wall));
+    }
+    hasher.update(world.hydrology.height_level.as_slice());
 
     hasher.finalize()
 }
@@ -143,6 +165,27 @@ fn boundary_tag(boundary: Option<BoundaryType>) -> u8 {
         Some(BoundaryType::Transform) => 1,
         Some(BoundaryType::Divergent) => 2,
         Some(BoundaryType::Convergent) => 3,
+    }
+}
+
+fn direction_tag(direction: Option<Direction>) -> u8 {
+    match direction {
+        None => 0,
+        Some(Direction::East) => 1,
+        Some(Direction::SouthEast) => 2,
+        Some(Direction::SouthWest) => 3,
+        Some(Direction::West) => 4,
+        Some(Direction::NorthWest) => 5,
+        Some(Direction::NorthEast) => 6,
+    }
+}
+
+fn river_tag(river: Option<RiverSize>) -> u8 {
+    match river {
+        None => 0,
+        Some(RiverSize::Creek) => 1,
+        Some(RiverSize::River) => 2,
+        Some(RiverSize::MajorRiver) => 3,
     }
 }
 
@@ -203,6 +246,45 @@ mod same_seed {
     }
 }
 
+// ------------- Hydrology invariants -------------
+
+mod hydrology {
+    use coords::Coord;
+
+    use super::*;
+
+    #[test]
+    fn every_flow_path_terminates_at_water_or_lake_for_seeds_one_through_eight() {
+        for seed in 1..=8 {
+            let params = test_params(seed);
+            let world = generate_world(&params).expect("generate_world failed");
+            for (coord, &height_level) in world.hydrology.height_level.iter_coords() {
+                if height_level <= 1 || world.hydrology.is_lake[coord] {
+                    continue;
+                }
+                assert_flow_path_terminates(coord, &world, seed);
+            }
+        }
+    }
+
+    fn assert_flow_path_terminates(coord: Coord, world: &worldgen::WorldData, seed: u64) {
+        let mut current = coord;
+        for _ in 0..world.hydrology.flow_direction.len() {
+            if world.hydrology.height_level[current] <= 1 || world.hydrology.is_lake[current] {
+                return;
+            }
+            let Some(direction) = world.hydrology.flow_direction[current] else {
+                panic!("flow path for seed {seed} reached non-lake land terminal at {current}");
+            };
+            current = world
+                .bounds
+                .neighbor(current, direction)
+                .expect("flow direction must stay in bounds");
+        }
+        panic!("flow path for seed {seed} starting at {coord} did not terminate");
+    }
+}
+
 // ------------- Cross-seed inequality -------------
 
 mod cross_seed {
@@ -257,7 +339,7 @@ mod reference_hash {
     /// This value must be updated whenever generation output changes
     /// intentionally.
     const REFERENCE_WORLD_DATA_HASH: &str =
-        "8b676b1b84e7580bb759da2d01c686a73ff584e8c93ffa03512c73296403bf59";
+        "5ab437190225fc3b435fae6f38404bcfbfbe257cf3cc1aa5aad68b02ee575c12";
 
     #[test]
     fn world_data_matches_committed_reference_hash() {

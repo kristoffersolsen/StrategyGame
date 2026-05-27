@@ -64,7 +64,7 @@
         climate_band_offset: 0.0,
 
         // Step 2 — Wind field
-        wind_amplitude: 0.18,       // CFL cap is 0.25
+        wind_amplitude: 0.1,       // CFL cap is 0.25
         wind_noise_amplitude: 0.1,
         wind_noise_frequency: 4.0,  // raised from 0.5: torus circle radius = 1/(2π) × freq,
                                     // so 0.5 gives radius≈0.08 (negligible N-S wind), 4.0 gives ≈0.64
@@ -93,5 +93,20 @@
         // Step 6 — Iteration count
         iteration_count_factor: 1.5,
         iteration_count_min: 500,
+    ),
+    hydrology: (
+        // Steps 2–3 — Basin detection + sink resolution
+        lake_basin_area_threshold: 50,
+
+        // Step 5 — River identification
+        river_flow_threshold: 0.04,
+        major_river_flow_threshold: 0.22, // between 0.2 and 0.3
+
+        // Step 6 — Floodplain marking
+        floodplain_elevation_tolerance: 0.05,
+
+        // Step 7 — Canyon carving
+        canyon_flow_slope_threshold: 0.25,
+        canyon_depth: 1,
     ),
 )

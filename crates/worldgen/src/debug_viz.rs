@@ -214,6 +214,65 @@ pub fn dump_field_hex<T: Copy>(
     })
 }
 
+/// Writes a one-pixel-per-tile RGB PNG of `field` to `path`.
+///
+/// This is the direct-color companion to [`dump_field_pixels`], used
+/// when callers need to compose multiple data layers before rendering
+/// rather than mapping one scalar field through a colormap.
+///
+/// # Errors
+///
+/// Returns [`VisError::Io`] if the PNG cannot be written to `path`.
+pub fn dump_rgb_field_pixels(field: &Field<[u8; 3]>, path: &Path) -> Result<(), VisError> {
+    let bounds = field.bounds();
+    let width = bounds.width();
+    let height = bounds.height();
+    let mut img = RgbImage::new(width, height);
+
+    for (coord, &rgb) in field.iter_coords() {
+        let px = coord.q.cast_unsigned();
+        let py = coord.r.cast_unsigned();
+        img.put_pixel(px, py, image::Rgb(rgb));
+    }
+
+    img.save(path).map_err(|source| VisError::Io {
+        path: path.to_owned(),
+        source,
+    })
+}
+
+/// Writes a hex-rasterized RGB PNG of `field` to `path`.
+///
+/// This is the direct-color companion to [`dump_field_hex`], used for
+/// composited overlay maps such as elevation plus rivers, lakes, and
+/// canyons.
+///
+/// # Errors
+///
+/// Returns [`VisError::Io`] if the PNG cannot be written to `path`.
+pub fn dump_rgb_field_hex(
+    field: &Field<[u8; 3]>,
+    path: &Path,
+    hex_size: u32,
+) -> Result<(), VisError> {
+    let bounds = field.bounds();
+    let (img_width, img_height) = hex_image_dimensions(bounds.width(), bounds.height(), hex_size);
+    let mut img = RgbImage::new(img_width, img_height);
+
+    for px in img.pixels_mut() {
+        *px = image::Rgb(HEX_BORDER_COLOR);
+    }
+
+    for (coord, &rgb) in field.iter_coords() {
+        rasterize_hex(&mut img, coord, bounds.width(), hex_size, rgb);
+    }
+
+    img.save(path).map_err(|source| VisError::Io {
+        path: path.to_owned(),
+        source,
+    })
+}
+
 /// Returns the pixel dimensions of a hex-rasterized image for a map
 /// with the given tile dimensions and hex circumradius.
 ///
