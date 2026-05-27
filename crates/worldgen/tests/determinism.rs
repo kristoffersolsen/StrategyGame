@@ -36,7 +36,7 @@
 use blake3::Hasher;
 use worldgen::{
     BasicParams, Biome, BoundaryType, Direction, Field, MapSize, MineralCharacter, PlateType,
-    RiverSize, WorldParams,
+    ResourceId, RiverSize, WorldParams,
     debug_viz::{Grayscale, dump_field_pixels},
     generate_world,
 };
@@ -61,7 +61,7 @@ fn test_params(seed: u64) -> WorldParams {
 fn world_data_hash(params: &WorldParams) -> blake3::Hash {
     let world = generate_world(params).expect("generate_world failed");
     let mut hasher = Hasher::new();
-    hasher.update(b"WorldData:v4");
+    hasher.update(b"WorldData:v5");
     hasher.update(&world.bounds.width().to_le_bytes());
     hasher.update(&world.bounds.height().to_le_bytes());
 
@@ -120,6 +120,10 @@ fn world_data_hash(params: &WorldParams) -> blake3::Hash {
         update_u8(&mut hasher, biome_tag(biome));
     }
     update_f32_field(&mut hasher, &world.biomes.forest_density);
+
+    for &resource in world.resources.resource.as_slice() {
+        update_u8(&mut hasher, resource_tag(resource));
+    }
 
     hasher.finalize()
 }
@@ -203,6 +207,21 @@ fn biome_tag(biome: Option<Biome>) -> u8 {
         Some(Biome::Grassland) => 4,
         Some(Biome::Desert) => 5,
         Some(Biome::Tundra) => 6,
+    }
+}
+
+fn resource_tag(resource: Option<ResourceId>) -> u8 {
+    match resource {
+        None => 0,
+        Some(ResourceId::Iron) => 1,
+        Some(ResourceId::Horses) => 2,
+        Some(ResourceId::Gold) => 3,
+        Some(ResourceId::Gems) => 4,
+        Some(ResourceId::Spices) => 5,
+        Some(ResourceId::Wine) => 6,
+        Some(ResourceId::Wheat) => 7,
+        Some(ResourceId::Fish) => 8,
+        Some(ResourceId::Stone) => 9,
     }
 }
 
@@ -356,7 +375,7 @@ mod reference_hash {
     /// This value must be updated whenever generation output changes
     /// intentionally.
     const REFERENCE_WORLD_DATA_HASH: &str =
-        "74a38dff3f6675fe9580aac4a9c38f217955c9978f191fb57b80e2ebc56dfe29";
+        "473252b78758fc30d5f1076ea6a03ca13cdbc5dc701c517db61ea11de9a6b419";
 
     #[test]
     fn world_data_matches_committed_reference_hash() {

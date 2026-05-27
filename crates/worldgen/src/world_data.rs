@@ -115,7 +115,9 @@ pub enum PlateType {
 /// Variants are intentionally coarse geological categories rather than
 /// specific resources, so the mapping from character to resource can be
 /// tuned independently of generation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum MineralCharacter {
     /// Rich in ferrous metals (iron, nickel). Common.
     Ferrous,
@@ -138,6 +140,48 @@ impl MineralCharacter {
         Self::Gems,
         Self::Hydrocarbons,
         Self::Industrial,
+    ];
+}
+
+// ------------- Resource classification -------------
+
+/// Resource identifier stored in the final resource layer.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub enum ResourceId {
+    /// Strategic metal resource.
+    Iron,
+    /// Strategic mounted-unit resource.
+    Horses,
+    /// Luxury precious-metal resource.
+    Gold,
+    /// Luxury gemstone resource.
+    Gems,
+    /// Luxury tropical crop resource.
+    Spices,
+    /// Luxury temperate crop resource.
+    Wine,
+    /// Bonus farm resource.
+    Wheat,
+    /// Bonus water-food resource.
+    Fish,
+    /// Bonus production resource.
+    Stone,
+}
+
+impl ResourceId {
+    /// All resources in stable definition order.
+    pub const ALL: &'static [Self] = &[
+        Self::Iron,
+        Self::Horses,
+        Self::Gold,
+        Self::Gems,
+        Self::Spices,
+        Self::Wine,
+        Self::Wheat,
+        Self::Fish,
+        Self::Stone,
     ];
 }
 
@@ -425,6 +469,28 @@ impl BiomeData {
     }
 }
 
+// ------------- Resource sub-structure -------------
+
+/// Data produced by the resource placement stage (Stage 3.5, design §1.13).
+#[derive(Debug, Clone)]
+pub struct ResourceData {
+    /// Per-tile resource assignment.
+    ///
+    /// `None` means the tile has no placed resource. `Some(id)` means
+    /// exactly one resource occupies the tile; resources do not stack.
+    pub resource: Field<Option<ResourceId>>,
+}
+
+impl ResourceData {
+    /// Constructs an empty [`ResourceData`] for the given map bounds.
+    #[must_use]
+    pub fn empty(bounds: MapBounds) -> Self {
+        Self {
+            resource: Field::filled(bounds, None),
+        }
+    }
+}
+
 // ------------- Top-level output -------------
 
 /// The finalized output of the generation pipeline, consumed by the
@@ -436,7 +502,7 @@ impl BiomeData {
 /// - Stage 3.2 (climate) → [`ClimateData`]
 /// - Stage 3.3 (hydrology) → [`HydrologyData`]
 /// - Stage 3.4 (biomes) → [`BiomeData`]
-/// - Stage 3.5 (resources) → `ResourceData` (not yet added)
+/// - Stage 3.5 (resources) → [`ResourceData`]
 /// - Stage 3.6 (starting positions) → `Vec<Coord>` (not yet added)
 ///
 /// See `documents/planning/implementation-plan.md` §3 for the full list.
@@ -458,6 +524,9 @@ pub struct WorldData {
 
     /// Output of the biome stage (design §1.12).
     pub biomes: BiomeData,
+
+    /// Output of the resource placement stage (design §1.13).
+    pub resources: ResourceData,
 }
 
 impl WorldData {
@@ -471,6 +540,7 @@ impl WorldData {
             climate: ClimateData::empty(bounds),
             hydrology: HydrologyData::empty(bounds),
             biomes: BiomeData::empty(bounds),
+            resources: ResourceData::empty(bounds),
         }
     }
 }

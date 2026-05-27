@@ -1,0 +1,164 @@
+// assets/worldgen/resources.ron
+//
+// Resource placement config for Stage 3.5.
+//
+// Rarity is the target fraction of eligible tiles before the Advanced
+// resource_abundance multiplier. Each tile can hold at most one resource.
+// Terrain filters are OR-combined; biome filters restrict land resources.
+//
+// latitude_preference uses normalized absolute latitude:
+//   0.0 = equator, 1.0 = poles.
+(
+    strategic: {
+        Iron: (
+            category: Strategic,
+            eligible_biomes: [],
+            eligible_terrain: [FlatLand, Hills],
+            latitude_preference: None,
+            rarity: 0.018,
+            cluster: false,
+            cluster_radius: 1,
+            min_spacing: 4,
+            baseline_fraction: 0.60,
+            mineral_affinities: {
+                Ferrous: 1.0,
+                Precious: 0.25,
+                Gems: 0.1,
+                Hydrocarbons: 0.2,
+                Industrial: 0.35,
+            },
+        ),
+        Horses: (
+            category: Strategic,
+            eligible_biomes: [Grassland],
+            eligible_terrain: [FlatLand],
+            latitude_preference: None,
+            rarity: 0.016,
+            cluster: false,
+            cluster_radius: 1,
+            min_spacing: 4,
+            baseline_fraction: 0.70,
+            mineral_affinities: {
+                Ferrous: 0.1,
+                Precious: 0.1,
+                Gems: 0.1,
+                Hydrocarbons: 0.1,
+                Industrial: 0.3,
+            },
+        ),
+    },
+
+    luxury: {
+        Gold: (
+            category: Luxury,
+            eligible_biomes: [],
+            eligible_terrain: [FlatLand, Hills],
+            latitude_preference: None,
+            rarity: 0.010,
+            cluster: true,
+            cluster_radius: 1,
+            min_spacing: 8,
+            baseline_fraction: 0.05,
+            mineral_affinities: {
+                Ferrous: 0.6,
+                Precious: 1.0,
+                Gems: 0.2,
+                Hydrocarbons: 0.0,
+                Industrial: 0.1,
+            },
+        ),
+        Gems: (
+            category: Luxury,
+            eligible_biomes: [],
+            eligible_terrain: [Hills],
+            latitude_preference: None,
+            rarity: 0.009,
+            cluster: true,
+            cluster_radius: 1,
+            min_spacing: 8,
+            baseline_fraction: 0.05,
+            mineral_affinities: {
+                Ferrous: 0.1,
+                Precious: 0.3,
+                Gems: 1.0,
+                Hydrocarbons: 0.0,
+                Industrial: 0.1,
+            },
+        ),
+        Spices: (
+            category: Luxury,
+            eligible_biomes: [TropicalRainforest, Grassland],
+            eligible_terrain: [FlatLand],
+            latitude_preference: Some((min: 0.0, max: 0.40)),
+            rarity: 0.012,
+            cluster: true,
+            cluster_radius: 1,
+            min_spacing: 7,
+            baseline_fraction: 0.05,
+            mineral_affinities: {
+                Ferrous: 0.0,
+                Precious: 0.1,
+                Gems: 0.0,
+                Hydrocarbons: 0.0,
+                Industrial: 0.2,
+            },
+        ),
+        Wine: (
+            category: Luxury,
+            eligible_biomes: [TemperateForest, Grassland],
+            eligible_terrain: [FlatLand],
+            latitude_preference: Some((min: 0.20, max: 0.70)),
+            rarity: 0.011,
+            cluster: true,
+            cluster_radius: 1,
+            min_spacing: 7,
+            baseline_fraction: 0.05,
+            mineral_affinities: {
+                Ferrous: 0.0,
+                Precious: 0.1,
+                Gems: 0.0,
+                Hydrocarbons: 0.0,
+                Industrial: 0.3,
+            },
+        ),
+    },
+
+    bonus: {
+        Wheat: (
+            category: Bonus,
+            eligible_biomes: [Grassland, TemperateForest],
+            eligible_terrain: [FlatLand],
+            latitude_preference: None,
+            rarity: 0.026,
+            cluster: false,
+            cluster_radius: 1,
+            min_spacing: 3,
+            baseline_fraction: 1.0,
+            mineral_affinities: {},
+        ),
+        Fish: (
+            category: Bonus,
+            eligible_biomes: [],
+            eligible_terrain: [Ocean, Coast],
+            latitude_preference: None,
+            rarity: 0.020,
+            cluster: false,
+            cluster_radius: 1,
+            min_spacing: 3,
+            baseline_fraction: 1.0,
+            mineral_affinities: {},
+        ),
+        Stone: (
+            category: Bonus,
+            eligible_biomes: [],
+            eligible_terrain: [Hills],
+            latitude_preference: None,
+            rarity: 0.022,
+            cluster: false,
+            cluster_radius: 1,
+            min_spacing: 3,
+            baseline_fraction: 1.0,
+            mineral_affinities: {},
+        ),
+    },
+)

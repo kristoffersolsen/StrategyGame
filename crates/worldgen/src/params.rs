@@ -29,6 +29,9 @@ pub use biomes::BiomeParams;
 mod hydrology;
 pub use hydrology::HydrologyParams;
 
+mod resources;
+pub use resources::ResourceParams;
+
 mod tectonics;
 pub use tectonics::{
     MAX_DETAIL_NOISE_OCTAVES, MAX_LAND_LEVEL_COUNT, MAX_TARGET_PLATE_COUNT,
@@ -40,6 +43,7 @@ use std::path::PathBuf;
 use crate::error::GenerationError;
 
 const DEFAULT_BIOME_TABLE_PATH: &str = "assets/worldgen/biome_table.ron";
+const DEFAULT_RESOURCE_CONFIG_PATH: &str = "assets/worldgen/resources.ron";
 
 /// The complete set of generation parameters and the master seed.
 ///
@@ -60,6 +64,8 @@ pub struct WorldParams {
     pub tuning: TuningParams,
     /// Path to the designer-editable biome lookup table.
     pub biome_table_path: PathBuf,
+    /// Path to the designer-editable resource placement config.
+    pub resource_config_path: PathBuf,
 }
 
 impl WorldParams {
@@ -76,6 +82,7 @@ impl WorldParams {
             advanced: AdvancedParams::const_default(),
             tuning: TuningParams::defaults(),
             biome_table_path: PathBuf::from(DEFAULT_BIOME_TABLE_PATH),
+            resource_config_path: PathBuf::from(DEFAULT_RESOURCE_CONFIG_PATH),
         }
     }
 
@@ -315,8 +322,10 @@ pub struct TuningParams {
     /// Knobs consumed by the biome stage (design §1.12).
     #[serde(default)]
     pub biomes: BiomeParams,
-    // Resources and starting-position sub-structs are added when their
-    // stages land.
+    /// Knobs consumed by the resource placement stage (design §1.13).
+    #[serde(default)]
+    pub resources: ResourceParams,
+    // Starting-position sub-struct is added when that stage lands.
 }
 
 impl TuningParams {
@@ -331,6 +340,7 @@ impl TuningParams {
             climate: ClimateParams::defaults(),
             hydrology: HydrologyParams::defaults(),
             biomes: BiomeParams::defaults(),
+            resources: ResourceParams::defaults(),
         }
     }
 
@@ -345,6 +355,7 @@ impl TuningParams {
         self.climate.validate()?;
         self.hydrology.validate()?;
         self.biomes.validate()?;
+        self.resources.validate()?;
         Ok(())
     }
 
@@ -357,6 +368,7 @@ impl TuningParams {
             && self.climate.is_all_default()
             && self.hydrology.is_all_default()
             && self.biomes.is_all_default()
+            && self.resources.is_all_default()
     }
 }
 

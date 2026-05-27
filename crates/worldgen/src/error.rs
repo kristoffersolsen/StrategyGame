@@ -33,6 +33,15 @@ pub enum GenerationError {
         reason: String,
     },
 
+    /// The resource placement config could not be loaded or failed validation.
+    #[error("invalid resource config {path}: {reason}")]
+    InvalidResourceConfig {
+        /// Path to the config being loaded.
+        path: String,
+        /// Human-readable description of the config problem.
+        reason: String,
+    },
+
     /// Starting-position selection (Stage 3.6, design §1.14) could not
     /// place all requested players while meeting the adequacy floor
     /// and spacing constraints.
