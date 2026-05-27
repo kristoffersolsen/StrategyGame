@@ -17,10 +17,9 @@
 //!
 //! # Wrap-awareness
 //!
-//! All noise evaluations use the torus-lifting technique from
-//! `perturbation.rs`: the `q` axis is mapped onto a circle before being
-//! passed to the noise function so the field is seamless at the east-west
-//! boundary.
+//! All noise evaluations use torus lifting: the `q` axis is mapped
+//! onto a circle before being passed to the noise function so the field
+//! is seamless at the east-west boundary.
 //!
 //! # Noise seeds
 //!
@@ -37,7 +36,7 @@ use crate::Field;
 use crate::params::TectonicsParams;
 use crate::world_data::{BoundaryType, Plate, PlateId, PlateType};
 
-// ------------- Torus-wrapping constants (shared with perturbation.rs) -------------
+// ------------- Torus-wrapping constants -------------
 
 /// Torus radius for wrap-aware noise input on the q-axis.
 ///

@@ -177,7 +177,7 @@ fn write_tectonics_plates(
     .with_context(|| format!("failed to write {}", seeds_path.display()))?;
 
     let plate_count = tectonics.seeds.len();
-    info!(plate_count, "noise-perturbed Voronoi partition complete");
+    info!(plate_count, "organic plate growth complete");
 
     let plates_px_path = output.join("31_03_plate_map_px.png");
     info!(path = %plates_px_path.display(), "writing plate map pixel PNG");

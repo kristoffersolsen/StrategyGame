@@ -167,18 +167,24 @@ impl MapBounds {
     /// ```
     #[must_use]
     pub fn distance(self, a: Coord, b: Coord) -> i32 {
-        let w = self.width.cast_signed();
-        let dq_raw = (a.q - b.q).abs();
-        // Wrap: shortest path around the cylinder.
-        let dx = dq_raw.min(w - dq_raw);
-        let dz = (a.r - b.r).abs();
-        // Third cube axis: y = -x - z, so |dy| = |dx + dz|.
-        // dx and dz are both non-negative magnitudes. We want the
-        // combination that gives the shortest path, which means we want
-        // them to cancel where possible — i.e. opposite signs.
-        // The minimum of (dx + dz) and |dx - dz| gives |dy| correctly.
-        let dy = (dx - dz).abs();
-        (dx + dz + dy) / 2
+        let width = i64::from(self.width);
+        let base_dq = i64::from(a.q) - i64::from(b.q);
+        let dr = i64::from(a.r) - i64::from(b.r);
+
+        // On a cylindrical map, `q` differs by any multiple of `width`
+        // across the wrap seam. Minimise axial cube distance over the
+        // relevant wrapped copies. The optimum occurs when `dq` is near
+        // either 0 or `-dr`, so checking floor/ceil around both targets
+        // is sufficient for the convex piecewise-linear distance function.
+        let mut best = axial_distance(base_dq, dr);
+        for target in [0, -dr] {
+            let k_floor = (target - base_dq).div_euclid(width);
+            for k in (k_floor - 1)..=(k_floor + 1) {
+                best = best.min(axial_distance(base_dq + k * width, dr));
+            }
+        }
+
+        i32::try_from(best).unwrap_or(i32::MAX)
     }
 
     /// Returns all in-bounds coordinates within `steps` of `center`.
@@ -217,6 +223,11 @@ impl MapBounds {
         }
         result
     }
+}
+
+/// Returns pointy-top axial hex distance for an unwrapped delta.
+fn axial_distance(dq: i64, dr: i64) -> i64 {
+    dq.abs().max(dr.abs()).max((dq + dr).abs())
 }
 
 impl fmt::Display for MapBounds {
@@ -358,6 +369,18 @@ mod tests {
             let b = MapBounds::new(10, 10);
             // q=0 and q=9 are adjacent on a width-10 map
             assert_eq!(b.distance(Coord::new(0, 5), Coord::new(9, 5)), 1);
+        }
+
+        #[test]
+        fn same_sign_diagonal_is_not_a_neighbor() {
+            let b = MapBounds::new(10, 10);
+            assert_eq!(b.distance(Coord::new(0, 0), Coord::new(1, 1)), 2);
+        }
+
+        #[test]
+        fn long_north_south_paths_can_use_wrap_seam() {
+            let b = MapBounds::new(10, 200);
+            assert_eq!(b.distance(Coord::new(0, 0), Coord::new(5, 100)), 100);
         }
 
         #[test]

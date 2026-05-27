@@ -8,7 +8,7 @@
 //!   checks during development.
 //!
 //! - **Hex mode** ([`dump_field_hex`]) — each tile rendered as a
-//!   rasterized flat-top hexagon. Slow, large output (~20MB for a
+//!   rasterized pointy-top hexagon. Slow, large output (~20MB for a
 //!   240×150 map at default size). Used for visual parameter tuning
 //!   via `mapdump`.
 //!
@@ -170,10 +170,10 @@ pub fn dump_field_pixels<T: Copy>(
 
 /// Writes a hex-rasterized PNG of `field` to `path`.
 ///
-/// Each tile is rendered as a filled flat-top hexagon with circumradius
+/// Each tile is rendered as a filled pointy-top hexagon with circumradius
 /// `hex_size` pixels. The output accurately represents the hex grid
-/// topology, including the offset between even and odd columns, making
-/// it suitable for visual parameter tuning.
+/// topology used by the `coords` crate, making it suitable for visual
+/// parameter tuning.
 ///
 /// For a 240×150 map with `hex_size = 8`, the output is approximately
 /// 2880×2340 pixels (~20MB before compression). For `hex_size = 4`
@@ -205,7 +205,7 @@ pub fn dump_field_hex<T: Copy>(
 
     for (coord, &value) in field.iter_coords() {
         let rgb = colormap.color(to_f32(value));
-        rasterize_hex(&mut img, coord, hex_size, rgb);
+        rasterize_hex(&mut img, coord, bounds.width(), hex_size, rgb);
     }
 
     img.save(path).map_err(|source| VisError::Io {
@@ -221,17 +221,17 @@ pub fn dump_field_hex<T: Copy>(
 /// writing.
 #[must_use]
 pub fn hex_image_dimensions(map_width: u32, map_height: u32, hex_size: u32) -> (u32, u32) {
-    // Flat-top hex geometry:
-    //   horizontal spacing = hex_size * 3/2
-    //   vertical spacing   = hex_size * √3
-    //   odd columns are offset by hex_size * √3/2 vertically
+    // Pointy-top axial hex geometry, wrapped horizontally to keep the
+    // cylindrical map rectangular in debug output.
     let s = f64::from(hex_size);
+    let inradius = s * SQRT3 / 2.0;
+    let max_center_y = 1.5 * s * f64::from(map_height - 1);
     // ceil() produces a value that fits in u32 for any reasonable map size.
     // The truncation is intentional: we want the pixel ceiling, not a float.
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let w = (s * 1.5 * f64::from(map_width) + s * 0.5 + 1.0).ceil() as u32;
+    let w = (SQRT3 * s * f64::from(map_width) + 2.0 * inradius + 2.0).ceil() as u32;
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let h = (s * SQRT3 * f64::from(map_height) + s * SQRT3 * 0.5 + 1.0).ceil() as u32;
+    let h = (max_center_y + 2.0 * s + 2.0).ceil() as u32;
     (w, h)
 }
 
@@ -241,31 +241,33 @@ const SQRT3: f64 = 1.732_050_808_569_442;
 
 /// Returns the pixel-space centre of the hex at `coord`.
 ///
-/// Converts axial `(q, r)` to pixel coordinates using an **odd-q
-/// offset layout**: every odd-indexed column is shifted down by half
-/// a hex height. This produces the staggered rectangular display
-/// familiar from Civilization-style hex maps, where the map as a
-/// whole is rectangular but adjacent columns interlock.
+/// Converts axial `(q, r)` to pointy-top pixel coordinates, wrapping
+/// the horizontal coordinate into the map width:
 ///
-/// The conversion treats `q` as the on-screen column and `r` as the
-/// axial row within that column. The odd-column vertical shift is
-/// applied explicitly via the `q & 1` term.
+/// ```text
+/// x = √3 * size * wrap(q + r / 2, map_width)
+/// y = 3/2 * size * r
+/// ```
+///
+/// A raw axial rectangle projects to a parallelogram. Because this map
+/// is cylindrical, the row shear can be absorbed into the east-west
+/// wrap seam instead, preserving a rectangular PNG footprint.
 ///
 /// We add padding of `size` on each axis so the topmost/leftmost
 /// tile is not clipped by the image boundary.
-fn hex_center(coord: Coord, hex_size: u32) -> (f64, f64) {
+fn hex_center(coord: Coord, map_width: u32, hex_size: u32) -> (f64, f64) {
     let size = f64::from(hex_size);
-    let col = f64::from(coord.q);
-    let row = f64::from(coord.r);
-    // Horizontal spacing: 3/2 * size per column. The 0.5 column of
-    // padding leaves room for the leftmost tile's leftmost pixel.
-    let cx = size * (1.5 * col + 1.0);
-    // Vertical spacing: √3 * size per row, plus √3/2 * size when in
-    // an odd column. The 0.5 row of padding leaves room for the
-    // topmost odd-column tile's top edge to sit below the image edge.
-    let odd_col_shift = if (coord.q & 1) == 0 { 0.0 } else { 0.5 };
-    let cy = size * SQRT3 * (row + odd_col_shift + 0.5);
+    let q = f64::from(coord.q);
+    let r = f64::from(coord.r);
+    let wrapped_x = wrap_unit(q + 0.5 * r, f64::from(map_width));
+    let cx = size * SQRT3 * wrapped_x + size * SQRT3 / 2.0 + 1.0;
+    let cy = size * 1.5 * r + size + 1.0;
     (cx, cy)
+}
+
+/// Wraps `value` into `[0, period)`.
+fn wrap_unit(value: f64, period: f64) -> f64 {
+    value.rem_euclid(period)
 }
 
 /// Background color painted behind all hex tiles.
@@ -282,21 +284,41 @@ const HEX_BORDER_COLOR: [u8; 3] = [40, 40, 40];
 /// and introduces boundary artifacts from floating-point edge cases).
 const HEX_BORDER_WIDTH: f64 = 1.0;
 
-/// Rasterizes a single flat-top hexagon centred at `coord` into `img`.
+/// Rasterizes a single pointy-top hexagon centred at `coord` into `img`.
 ///
 /// Uses a bounding-box scan with a point-in-hexagon test. The
 /// circumradius is `hex_size` pixels; the inradius (centre to edge
 /// midpoint) is `hex_size * √3/2`. The filled area is inset by
 /// [`HEX_BORDER_WIDTH`] pixels so adjacent tiles leave a visible gap
 /// that renders as grid lines against the background color.
-fn rasterize_hex(img: &mut RgbImage, coord: Coord, hex_size: u32, rgb: [u8; 3]) {
+fn rasterize_hex(img: &mut RgbImage, coord: Coord, map_width: u32, hex_size: u32, rgb: [u8; 3]) {
     let size = f64::from(hex_size);
     // Inset the fill radius so tiles don't touch. This simultaneously
     // produces visible borders and eliminates boundary artifacts caused
     // by floating-point ambiguity at the exact edge between two tiles.
     let fill_size = size - HEX_BORDER_WIDTH;
-    let (cx, cy) = hex_center(coord, hex_size);
+    let (cx, cy) = hex_center(coord, map_width, hex_size);
+    rasterize_hex_at_center(img, cx, cy, size, fill_size, rgb);
 
+    // Tiles crossing the visual wrap seam need a duplicate on the
+    // opposite edge so the rectangular PNG has no clipped seam gaps.
+    let wrap_width_px = SQRT3 * size * f64::from(map_width);
+    if cx - size < 0.0 {
+        rasterize_hex_at_center(img, cx + wrap_width_px, cy, size, fill_size, rgb);
+    }
+    if cx + size >= f64::from(img.width()) {
+        rasterize_hex_at_center(img, cx - wrap_width_px, cy, size, fill_size, rgb);
+    }
+}
+
+fn rasterize_hex_at_center(
+    img: &mut RgbImage,
+    cx: f64,
+    cy: f64,
+    size: f64,
+    fill_size: f64,
+    rgb: [u8; 3],
+) {
     // Bounding box: circumscribed rectangle of the full (unclipped) hex.
     // floor()/ceil() make the f64→i64 truncation exact (no fractional
     // part remains). .max(0) and .min(img_dim-1) guarantee the i64→u32
@@ -328,30 +350,30 @@ fn rasterize_hex(img: &mut RgbImage, coord: Coord, hex_size: u32, rgb: [u8; 3]) 
 
     for py in y_min..=y_max {
         for px in x_min..=x_max {
-            if point_in_flat_top_hex(f64::from(px), f64::from(py), cx, cy, fill_size) {
+            if point_in_pointy_top_hex(f64::from(px), f64::from(py), cx, cy, fill_size) {
                 img.put_pixel(px, py, image::Rgb(rgb));
             }
         }
     }
 }
 
-/// Returns `true` if pixel `(px, py)` lies inside a flat-top hexagon
+/// Returns `true` if pixel `(px, py)` lies inside a pointy-top hexagon
 /// centred at `(cx, cy)` with circumradius `s`.
 ///
 /// Uses three separating-axis conditions from the hex edge normals:
 ///
-/// - Left/right edges (vertical):   `|dx| ≤ s`
-/// - Top/bottom edges (horizontal): `|dy| ≤ inradius`  where `inradius = s * √3/2`
-/// - Diagonal edges:                `|dx| + |dy| / √3 ≤ s`
+/// - Top/bottom vertices:           `|dy| ≤ s`
+/// - Left/right edges:              `|dx| ≤ inradius` where `inradius = s * √3/2`
+/// - Diagonal edges:                `|dy| + |dx| / √3 ≤ s`
 ///
 /// All three must hold for the point to be inside. The derivation of
-/// condition 3 comes from the diagonal edge passing through `(s, 0)`
-/// and `(s/2, inradius)` with inward normal `(√3, 1)/2`.
-fn point_in_flat_top_hex(px: f64, py: f64, cx: f64, cy: f64, circumradius: f64) -> bool {
+/// condition 3 comes from the diagonal edge passing through `(0, s)`
+/// and `(inradius, s / 2)`.
+fn point_in_pointy_top_hex(px: f64, py: f64, cx: f64, cy: f64, circumradius: f64) -> bool {
     let dx = (px - cx).abs();
     let dy = (py - cy).abs();
     let inr = circumradius * SQRT3 / 2.0;
-    dx <= circumradius && dy <= inr && dx + dy / SQRT3 <= circumradius
+    dy <= circumradius && dx <= inr && dy + dx / SQRT3 <= circumradius
 }
 
 // ------------- Viridis LUT -------------
@@ -644,17 +666,28 @@ mod tests {
         assert!(h2 > h1);
     }
 
-    // ------------- point_in_flat_top_hex -------------
+    #[test]
+    fn hex_dimensions_keep_rectangular_map_footprint() {
+        let (w, h) = hex_image_dimensions(120, 80, 4);
+        let aspect = f64::from(w) / f64::from(h);
+        let map_aspect = 120.0 / 80.0;
+        assert!(
+            (aspect - map_aspect).abs() < 1.0,
+            "hex render should not shear the map into a wide parallelogram: {aspect}"
+        );
+    }
+
+    // ------------- point_in_pointy_top_hex -------------
 
     #[test]
     fn center_is_inside_hex() {
-        assert!(point_in_flat_top_hex(0.0, 0.0, 0.0, 0.0, 8.0));
+        assert!(point_in_pointy_top_hex(0.0, 0.0, 0.0, 0.0, 8.0));
     }
 
     #[test]
     fn far_corner_is_outside_hex() {
-        // A point beyond the circumradius on the horizontal axis.
-        assert!(!point_in_flat_top_hex(8.1, 0.0, 0.0, 0.0, 8.0));
+        // A point beyond the circumradius on the vertical axis.
+        assert!(!point_in_pointy_top_hex(0.0, 8.1, 0.0, 0.0, 8.0));
     }
 
     // ------------- dump_field_pixels -------------

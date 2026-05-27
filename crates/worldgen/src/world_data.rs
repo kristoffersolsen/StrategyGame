@@ -162,8 +162,8 @@ pub struct TectonicData {
     /// given `(params, seed)` but not geographically sorted.
     pub seeds: Vec<Coord>,
 
-    /// Per-tile plate assignment produced by noise-perturbed Voronoi
-    /// partition (steps 2–3).
+    /// Per-tile plate assignment produced by organic flood-fill growth
+    /// from plate seeds (step 2).
     ///
     /// Each cell holds the [`PlateId`] of the plate that owns the tile.
     /// The value is an index into [`Self::seeds`] and [`Self::plates`].

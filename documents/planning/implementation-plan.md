@@ -598,6 +598,6 @@ If the plan and reality drift, the plan is wrong. Fix it.
 
 ## Status
 
-**Current stage:** Stage 3.1 complete.
+**Current stage:** Stage 3.2 complete.
 
-**Next action:** Begin stage 3.2 — Climate.
+**Next action:** Begin stage 3.3 — Hydrology.

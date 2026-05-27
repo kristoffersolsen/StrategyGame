@@ -64,12 +64,12 @@ When pillars conflict in a specific design decision, the resolution should be do
 ## 1. Map Foundation
 
 ### 1.1 Tiling
-**Decision:** Hexagonal tiling, flat-top orientation, axial coordinates.
+**Decision:** Hexagonal tiling, pointy-top orientation, axial coordinates.
 
-**Rationale:** Hex is the genre standard for good reasons (uniform neighbor distance, better movement feel). Flat-top fits east-west wrap naturally — "east" and "west" are unambiguous directions. Axial storage with on-demand conversion to cube for distance/LOS math.
+**Rationale:** Hex is the genre standard for good reasons (uniform neighbor distance, better movement feel). Pointy-top matches the coordinate implementation already used by the `coords` crate. Axial storage with on-demand conversion to cube for distance/LOS math.
 
 **Risks:**
-- Flat-top is less common in popular Civ-likes (Civ uses pointy-top), so reference material may need adaptation.
+- Documentation and rendering must stay aligned with the coordinate implementation; a split orientation would make visual validation misleading.
 
 **Mitigation:**
 - Red Blob Games' hex reference covers both orientations. Encapsulate coordinate math in one module so the choice is contained.

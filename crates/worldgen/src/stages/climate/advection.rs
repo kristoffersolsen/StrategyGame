@@ -110,13 +110,22 @@ pub(crate) fn advection_step(
             }
 
             // Retained fraction: what the tile keeps after wind outflow and diffusion.
-            let retained = m * (1.0 - total_outflow - params.diffusion_rate).max(0.0);
+            // Validated parameters keep the budget ≤ 1.0; the scale is
+            // a defensive guard against numerical edge cases or tests
+            // that call this kernel directly with synthetic wind fields.
+            let outflow_budget = total_outflow + params.diffusion_rate;
+            let outflow_scale = if outflow_budget > 1.0 {
+                1.0 / outflow_budget
+            } else {
+                1.0
+            };
+            let retained = m * (1.0 - outflow_budget * outflow_scale).max(0.0);
             *moisture_out.get_mut(coord).expect("coord is in bounds") += retained;
 
             // Distribute wind-advected flux plus equal diffusion share to each neighbour.
-            let diff_flux = m * params.diffusion_rate / 6.0;
+            let diff_flux = m * params.diffusion_rate * outflow_scale / 6.0;
             for (dir, idx) in DIRECTION_UNIT_VEC {
-                let flux = m * projections[idx] + diff_flux;
+                let flux = m * projections[idx] * outflow_scale + diff_flux;
                 if flux <= 0.0 {
                     continue;
                 }
@@ -137,13 +146,15 @@ pub(crate) fn advection_step(
                 *moisture_out.get_mut(coord).expect("coord is in bounds") +=
                     params.evapotranspiration_rate * m;
             }
+        }
+    }
 
-            // Moisture cap: prevent any tile from accumulating unbounded moisture.
-            #[allow(clippy::float_cmp)]
-            if params.moisture_cap != f32::MAX {
-                let out = moisture_out.get_mut(coord).expect("coord is in bounds");
-                *out = out.min(params.moisture_cap);
-            }
+    // Moisture cap: apply after all incoming neighbour flux and source
+    // terms have accumulated so the cap is independent of iteration order.
+    #[allow(clippy::float_cmp)]
+    if params.moisture_cap != f32::MAX {
+        for cell in moisture_out {
+            *cell = cell.min(params.moisture_cap);
         }
     }
 }
@@ -222,12 +233,12 @@ mod tests {
     }
 
     #[test]
-    fn positive_x_wind_distributes_to_east_and_northeast_neighbors() {
+    fn positive_x_wind_distributes_to_eastward_neighbors() {
         let bounds = MapBounds::new(10, 10);
         let (mut moisture_in, mut moisture_out, mut wind, evap, height_level) = make_fields(bounds);
         moisture_in.set(Coord::new(5, 5), 1.0);
-        // Wind with only positive x component — projects onto East (idx 0)
-        // and NorthEast (idx 2) which both have positive x components.
+        // In the pointy-top frame, positive x projects onto East,
+        // NorthEast, and SouthEast.
         wind.fill([0.1_f32, 0.0]);
 
         let params = ClimateParams::defaults();
@@ -246,6 +257,68 @@ mod tests {
         assert!(
             (total - 1.0).abs() < 1e-4,
             "total moisture must be conserved for interior tile, got {total}"
+        );
+        assert!(moisture_out[Coord::new(6, 5)] > 0.0, "east receives flux");
+        assert!(
+            moisture_out[Coord::new(6, 4)] > 0.0,
+            "north-east receives flux"
+        );
+        assert!(
+            moisture_out[Coord::new(5, 6)] > 0.0,
+            "south-east receives flux"
+        );
+    }
+
+    #[test]
+    fn excessive_synthetic_wind_does_not_create_moisture() {
+        let bounds = MapBounds::new(10, 10);
+        let (mut moisture_in, mut moisture_out, mut wind, evap, height_level) = make_fields(bounds);
+        moisture_in.set(Coord::new(5, 5), 1.0);
+        wind.fill([2.0_f32, 0.0]);
+
+        let params = ClimateParams::defaults();
+        advection_step(
+            &moisture_in,
+            &mut moisture_out,
+            &wind,
+            &evap,
+            &height_level,
+            bounds,
+            &params,
+        );
+
+        let total: f32 = moisture_out.iter().copied().sum();
+        assert!(
+            (total - 1.0).abs() < 1e-4,
+            "advection must not create moisture when synthetic wind exceeds CFL, got {total}"
+        );
+    }
+
+    #[test]
+    fn moisture_cap_applies_after_all_incoming_flux() {
+        let bounds = MapBounds::new(10, 10);
+        let (mut moisture_in, mut moisture_out, wind, evap, height_level) = make_fields(bounds);
+        moisture_in.set(Coord::new(4, 5), 1.0);
+        moisture_in.set(Coord::new(6, 5), 1.0);
+
+        let params = ClimateParams {
+            diffusion_rate: 0.5,
+            moisture_cap: 0.1,
+            ..ClimateParams::defaults()
+        };
+        advection_step(
+            &moisture_in,
+            &mut moisture_out,
+            &wind,
+            &evap,
+            &height_level,
+            bounds,
+            &params,
+        );
+
+        assert!(
+            moisture_out.iter().all(|&v| v <= params.moisture_cap),
+            "all tiles must respect moisture cap after incoming flux accumulates"
         );
     }
 }

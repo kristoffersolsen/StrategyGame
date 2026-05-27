@@ -35,7 +35,7 @@ use crate::Field;
 use crate::params::TectonicsParams;
 use crate::world_data::BoundaryType;
 
-// ------------- Torus-wrapping constants (same convention as perturbation.rs) -------------
+// ------------- Torus-wrapping constants -------------
 
 const TORUS_RADIUS: f64 = 1.0 / (2.0 * std::f64::consts::PI);
 const NOISE_Z_SCALE: f64 = 1.0 / 150.0;

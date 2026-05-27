@@ -11,39 +11,33 @@
 //!
 //! 1. **Same-seed equality** — two runs with identical params produce
 //!    identical output. These run on every `cargo test` invocation and
-//!    catch regressions immediately. Uses a field filled from the
-//!    Tectonics sub-RNG so the output genuinely varies by seed.
+//!    catch regressions immediately. Hashes the generated tectonics
+//!    and climate fields, so the output genuinely varies by seed.
 //!
 //! 2. **Cross-seed inequality** — different seeds produce different
 //!    output. Sanity check against a collapsed RNG.
 //!
 //! 3. **Reference hash** — a known `(seed, params)` pair produces a
-//!    specific committed blake3 hash. These are `#[ignore]`d until
-//!    Stage 3.1 (tectonics) lands: the current stub `WorldData` holds
-//!    only `MapBounds`, whose hash is trivially constant. Un-ignore and
-//!    commit a real hash in the Stage 3.1 PR.
+//!    specific committed blake3 hash. This catches intentional or
+//!    accidental generation-output drift.
 //!
 //! # How to update the reference hash
 //!
 //! After a deliberate generation change, run:
 //!
 //! ```text
-//! cargo test -p worldgen reference_hash -- --ignored --nocapture
+//! cargo test -p worldgen reference_hash -- --nocapture
 //! ```
 //!
 //! The test prints the new hash. Paste it into `REFERENCE_HASH` below
 //! and commit alongside the generation change. The commit message must
 //! note that the reference hash changed and why.
 
-use std::path::Path;
-
 use blake3::Hasher;
-use rand_core::Rng;
 use worldgen::{
-    BasicParams, Field, MapSize, WorldParams,
-    debug_viz::{Grayscale, Viridis, dump_field_pixels},
+    BasicParams, BoundaryType, Field, MapSize, MineralCharacter, PlateType, WorldParams,
+    debug_viz::{Grayscale, dump_field_pixels},
     generate_world,
-    rng::{MasterRng, StageId},
 };
 
 // ------------- helpers -------------
@@ -62,45 +56,94 @@ fn test_params(seed: u64) -> WorldParams {
     }
 }
 
-/// Hashes the raw bytes of a PNG file on disk using blake3.
-fn hash_png_file(path: &Path) -> blake3::Hash {
-    let bytes = std::fs::read(path).expect("failed to read PNG for hashing");
-    blake3::hash(&bytes)
-}
-
-/// Renders a field filled with values drawn from the Tectonics sub-RNG
-/// to a pixel PNG and returns its blake3 hash.
-///
-/// Unlike the gradient field, this field's values depend directly on the
-/// seed, so different seeds produce genuinely different hashes.
-fn seeded_field_hash_for(params: &WorldParams) -> blake3::Hash {
-    let world = generate_world(params).expect("generate_world failed");
-    let bounds = world.bounds;
-    let master = MasterRng::new(params.seed);
-    let mut rng = master.fork(StageId::Tectonics);
-
-    // Fill a field with u32 values drawn from the RNG, one per tile.
-    // Normalized to [0.0, 1.0] for the colormap.
-    #[allow(clippy::cast_precision_loss)]
-    let field = Field::from_fn(bounds, |_coord| rng.next_u32() as f32 / u32::MAX as f32);
-
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("seeded.png");
-    dump_field_pixels(&field, &path, |v| v, &Viridis).expect("dump failed");
-    hash_png_file(&path)
-}
-
-/// Hashes `WorldData` directly via blake3, feeding width and height as
-/// bytes. Minimal but correct for the current stub that only carries
-/// `MapBounds`.
-///
-/// Extend this function as `WorldData` gains fields in Stage 3.
+/// Hashes `WorldData` directly via blake3.
 fn world_data_hash(params: &WorldParams) -> blake3::Hash {
     let world = generate_world(params).expect("generate_world failed");
     let mut hasher = Hasher::new();
+    hasher.update(b"WorldData:v2");
     hasher.update(&world.bounds.width().to_le_bytes());
     hasher.update(&world.bounds.height().to_le_bytes());
+
+    update_len(&mut hasher, world.tectonics.seeds.len());
+    for seed in &world.tectonics.seeds {
+        update_i32(&mut hasher, seed.q);
+        update_i32(&mut hasher, seed.r);
+    }
+    hasher.update(world.tectonics.plate_id.as_slice());
+    update_len(&mut hasher, world.tectonics.plates.len());
+    for plate in &world.tectonics.plates {
+        update_u8(&mut hasher, plate_type_tag(plate.plate_type));
+        update_f32(&mut hasher, plate.motion.dx);
+        update_f32(&mut hasher, plate.motion.dy);
+        update_u8(&mut hasher, mineral_tag(plate.mineral_character));
+    }
+    for &boundary in world.tectonics.boundary_type.as_slice() {
+        update_u8(&mut hasher, boundary_tag(boundary));
+    }
+    update_f32_field(&mut hasher, &world.tectonics.elevation);
+    hasher.update(world.tectonics.height_level.as_slice());
+    for &is_hilly in world.tectonics.is_hilly.as_slice() {
+        update_u8(&mut hasher, u8::from(is_hilly));
+    }
+
+    update_f32_field(&mut hasher, &world.climate.temperature);
+    update_f32_field(&mut hasher, &world.climate.moisture);
+    for &[east, south] in world.climate.wind.as_slice() {
+        update_f32(&mut hasher, east);
+        update_f32(&mut hasher, south);
+    }
+    update_f32_field(&mut hasher, &world.climate.precipitation);
+
     hasher.finalize()
+}
+
+fn update_len(hasher: &mut Hasher, len: usize) {
+    let len = u64::try_from(len).expect("field length fits in u64");
+    hasher.update(&len.to_le_bytes());
+}
+
+fn update_i32(hasher: &mut Hasher, value: i32) {
+    hasher.update(&value.to_le_bytes());
+}
+
+fn update_u8(hasher: &mut Hasher, value: u8) {
+    hasher.update(&[value]);
+}
+
+fn update_f32(hasher: &mut Hasher, value: f32) {
+    hasher.update(&value.to_bits().to_le_bytes());
+}
+
+fn update_f32_field(hasher: &mut Hasher, field: &Field<f32>) {
+    for &value in field.as_slice() {
+        update_f32(hasher, value);
+    }
+}
+
+fn plate_type_tag(plate_type: PlateType) -> u8 {
+    match plate_type {
+        PlateType::Continental => 0,
+        PlateType::Oceanic => 1,
+    }
+}
+
+fn mineral_tag(mineral: MineralCharacter) -> u8 {
+    match mineral {
+        MineralCharacter::Ferrous => 0,
+        MineralCharacter::Precious => 1,
+        MineralCharacter::Gems => 2,
+        MineralCharacter::Hydrocarbons => 3,
+        MineralCharacter::Industrial => 4,
+    }
+}
+
+fn boundary_tag(boundary: Option<BoundaryType>) -> u8 {
+    match boundary {
+        None => 0,
+        Some(BoundaryType::Transform) => 1,
+        Some(BoundaryType::Divergent) => 2,
+        Some(BoundaryType::Convergent) => 3,
+    }
 }
 
 // ------------- Same-seed equality -------------
@@ -109,18 +152,18 @@ mod same_seed {
     use super::*;
 
     #[test]
-    fn identical_params_produce_identical_gradient_hash() {
+    fn identical_params_produce_identical_world_data_hash() {
         let params = test_params(0xDEAD_BEEF);
-        let hash_a = seeded_field_hash_for(&params);
-        let hash_b = seeded_field_hash_for(&params);
+        let hash_a = world_data_hash(&params);
+        let hash_b = world_data_hash(&params);
         assert_eq!(
             hash_a, hash_b,
-            "same params produced different gradient PNGs across two runs"
+            "same params produced different WorldData hashes across two runs"
         );
     }
 
     #[test]
-    fn identical_params_produce_identical_world_data_hash() {
+    fn repeated_world_generation_is_bit_identical() {
         let params = test_params(0xDEAD_BEEF);
         let hash_a = world_data_hash(&params);
         let hash_b = world_data_hash(&params);
@@ -135,8 +178,8 @@ mod same_seed {
         // Verify the property for a range of seeds, not just one.
         for seed in [0, 1, 42, 0xFFFF_FFFF, u64::MAX] {
             let params = test_params(seed);
-            let hash_a = seeded_field_hash_for(&params);
-            let hash_b = seeded_field_hash_for(&params);
+            let hash_a = world_data_hash(&params);
+            let hash_b = world_data_hash(&params);
             assert_eq!(hash_a, hash_b, "determinism failed for seed {seed:#x}");
         }
     }
@@ -153,8 +196,8 @@ mod same_seed {
                 },
                 ..WorldParams::default()
             };
-            let hash_a = seeded_field_hash_for(&params);
-            let hash_b = seeded_field_hash_for(&params);
+            let hash_a = world_data_hash(&params);
+            let hash_b = world_data_hash(&params);
             assert_eq!(hash_a, hash_b, "determinism failed for size {size:?}");
         }
     }
@@ -166,18 +209,18 @@ mod cross_seed {
     use super::*;
 
     #[test]
-    fn different_seeds_produce_different_gradient_hashes() {
+    fn different_seeds_produce_different_world_data_hashes() {
         // If all seeds collapse to the same output, the RNG is broken.
-        let hash_0 = seeded_field_hash_for(&test_params(0));
-        let hash_1 = seeded_field_hash_for(&test_params(1));
+        let hash_0 = world_data_hash(&test_params(0));
+        let hash_1 = world_data_hash(&test_params(1));
         assert_ne!(
             hash_0, hash_1,
-            "seeds 0 and 1 produced identical gradient PNGs — RNG may be broken"
+            "seeds 0 and 1 produced identical WorldData hashes — RNG may be broken"
         );
     }
 
     #[test]
-    fn different_map_sizes_produce_different_gradient_hashes() {
+    fn different_map_sizes_produce_different_world_data_hashes() {
         let small = WorldParams {
             seed: 42,
             basic: BasicParams {
@@ -194,63 +237,29 @@ mod cross_seed {
             },
             ..WorldParams::default()
         };
-        let hash_small = seeded_field_hash_for(&small);
-        let hash_standard = seeded_field_hash_for(&standard);
+        let hash_small = world_data_hash(&small);
+        let hash_standard = world_data_hash(&standard);
         assert_ne!(
             hash_small, hash_standard,
-            "different map sizes produced identical gradient PNGs"
+            "different map sizes produced identical WorldData hashes"
         );
     }
 }
 
-// ------------- Reference hash (ignored until Stage 3.1) -------------
+// ------------- Reference hash -------------
 
 mod reference_hash {
     use super::*;
 
-    /// blake3 hash of the pixel PNG of a Tectonics-sub-RNG-filled field
-    /// for seed `0xDEAD_BEEF` on a `Small` map (120×80 tiles).
-    ///
-    /// **This value must be updated whenever generation output changes.**
-    /// Run with `--ignored --nocapture` to print the current hash, then
-    /// paste it here and commit alongside the generation change.
-    ///
-    /// Set to all-zeros as a placeholder until Stage 3.1 produces real
-    /// generation data worth committing.
-    const REFERENCE_SEEDED_FIELD_HASH: &str =
-        "0000000000000000000000000000000000000000000000000000000000000000";
-
-    #[test]
-    #[ignore = "placeholder: un-ignore in Stage 3.1 once tectonics produces real fields"]
-    fn seeded_field_matches_committed_reference_hash() {
-        let params = test_params(0xDEAD_BEEF);
-        let hash = seeded_field_hash_for(&params);
-        let hash_hex = hash.to_hex();
-
-        // Print the current hash so it's easy to update.
-        println!("current seeded field hash: {hash_hex}");
-        println!("expected:                  {REFERENCE_SEEDED_FIELD_HASH}");
-
-        assert_eq!(
-            hash_hex.as_str(),
-            REFERENCE_SEEDED_FIELD_HASH,
-            "seeded field hash changed — if this is intentional, update \
-             REFERENCE_SEEDED_FIELD_HASH and commit alongside the generation change"
-        );
-    }
-
-    /// blake3 hash of the `WorldData` (currently just `MapBounds`) for
+    /// blake3 hash of the generated `WorldData` for
     /// seed `0xDEAD_BEEF` on a `Small` map.
     ///
-    /// This test is low-value while `WorldData` is a stub. It becomes
-    /// meaningful in Stage 3.1 when elevation and plate fields are added.
-    /// Un-ignore then, update the hash, and extend `world_data_hash` to
-    /// cover the new fields.
+    /// This value must be updated whenever generation output changes
+    /// intentionally.
     const REFERENCE_WORLD_DATA_HASH: &str =
-        "0000000000000000000000000000000000000000000000000000000000000000";
+        "8b676b1b84e7580bb759da2d01c686a73ff584e8c93ffa03512c73296403bf59";
 
     #[test]
-    #[ignore = "placeholder: un-ignore in Stage 3.1 once WorldData carries real fields"]
     fn world_data_matches_committed_reference_hash() {
         let params = test_params(0xDEAD_BEEF);
         let hash = world_data_hash(&params);
