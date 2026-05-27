@@ -43,7 +43,7 @@ use coords::Coord;
 use image::{ImageError, RgbImage};
 
 use crate::Field;
-use crate::world_data::Biome;
+use crate::world_data::{Biome, ResourceId};
 
 // ------------- Error type -------------
 
@@ -123,6 +123,43 @@ impl Colormap for Categorical {
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let idx = (value.abs() as usize) % CATEGORICAL_PALETTE.len();
         CATEGORICAL_PALETTE[idx]
+    }
+}
+
+/// Categorical colormap for resource overlays.
+pub struct ResourceCmap;
+
+impl Colormap for ResourceCmap {
+    fn color(&self, value: f32) -> [u8; 3] {
+        match resource_value_to_id(value) {
+            None => [18, 24, 28],
+            Some(ResourceId::Iron) => [120, 120, 125],
+            Some(ResourceId::Horses) => [185, 120, 55],
+            Some(ResourceId::Gold) => [235, 190, 45],
+            Some(ResourceId::Gems) => [60, 190, 210],
+            Some(ResourceId::Spices) => [210, 80, 45],
+            Some(ResourceId::Wine) => [145, 45, 115],
+            Some(ResourceId::Wheat) => [225, 210, 105],
+            Some(ResourceId::Fish) => [65, 145, 220],
+            Some(ResourceId::Stone) => [150, 150, 135],
+        }
+    }
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn resource_value_to_id(value: f32) -> Option<ResourceId> {
+    let index = value.round() as i32;
+    match index {
+        1 => Some(ResourceId::Iron),
+        2 => Some(ResourceId::Horses),
+        3 => Some(ResourceId::Gold),
+        4 => Some(ResourceId::Gems),
+        5 => Some(ResourceId::Spices),
+        6 => Some(ResourceId::Wine),
+        7 => Some(ResourceId::Wheat),
+        8 => Some(ResourceId::Fish),
+        9 => Some(ResourceId::Stone),
+        _ => None,
     }
 }
 

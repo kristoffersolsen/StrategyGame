@@ -11,4 +11,5 @@
 pub(crate) mod biomes;
 pub(crate) mod climate;
 pub(crate) mod hydrology;
+pub(crate) mod resources;
 pub(crate) mod tectonics;

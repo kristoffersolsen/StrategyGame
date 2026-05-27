@@ -130,4 +130,11 @@
         forest_noise_frequency: 0.4,
         forest_noise_amplitude: 0.6,
     ),
+    resources: (
+        // Step 7 — Clustered luxury expansion
+        cluster_expansion_attempts: 8,
+
+        // Steps 4–7 — Shared Poisson-disk scatter rejection limit
+        poisson_max_attempts: 30,
+    ),
 )

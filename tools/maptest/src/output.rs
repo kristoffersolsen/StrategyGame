@@ -14,11 +14,12 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use tracing::info;
 use worldgen::{
-    Biome, BiomeData, BoundaryType, ClimateData, Direction, Field, HydrologyData, RiverSize,
-    TectonicData, WorldData,
+    Biome, BiomeData, BoundaryType, ClimateData, Direction, Field, HydrologyData, ResourceData,
+    ResourceId, RiverSize, TectonicData, WorldData,
     debug_viz::{
-        BiomeCmap, BoundaryCmap, Categorical, Colormap, Grayscale, HeightLevelCmap, Viridis,
-        dump_field_hex, dump_field_pixels, dump_field_with_seed_overlay, dump_rgb_field_hex,
+        BiomeCmap, BoundaryCmap, Categorical, Colormap, Grayscale, HeightLevelCmap, ResourceCmap,
+        Viridis, dump_field_hex, dump_field_pixels, dump_field_with_seed_overlay,
+        dump_rgb_field_hex,
     },
 };
 
@@ -46,6 +47,16 @@ pub(crate) const SUBDIR_CANYONS: &str = "canyons";
 pub(crate) const SUBDIR_HYDROLOGY_OVERLAY: &str = "hydrology_overlay";
 pub(crate) const SUBDIR_BIOMES: &str = "biomes";
 pub(crate) const SUBDIR_FOREST_DENSITY: &str = "forest_density";
+pub(crate) const SUBDIR_RESOURCES: &str = "resources";
+pub(crate) const SUBDIR_RESOURCE_IRON: &str = "resource_iron";
+pub(crate) const SUBDIR_RESOURCE_HORSES: &str = "resource_horses";
+pub(crate) const SUBDIR_RESOURCE_GOLD: &str = "resource_gold";
+pub(crate) const SUBDIR_RESOURCE_GEMS: &str = "resource_gems";
+pub(crate) const SUBDIR_RESOURCE_SPICES: &str = "resource_spices";
+pub(crate) const SUBDIR_RESOURCE_WINE: &str = "resource_wine";
+pub(crate) const SUBDIR_RESOURCE_WHEAT: &str = "resource_wheat";
+pub(crate) const SUBDIR_RESOURCE_FISH: &str = "resource_fish";
+pub(crate) const SUBDIR_RESOURCE_STONE: &str = "resource_stone";
 
 pub(crate) const ALL_SUBDIRS: &[&str] = &[
     SUBDIR_SEEDS,
@@ -70,6 +81,16 @@ pub(crate) const ALL_SUBDIRS: &[&str] = &[
     SUBDIR_HYDROLOGY_OVERLAY,
     SUBDIR_BIOMES,
     SUBDIR_FOREST_DENSITY,
+    SUBDIR_RESOURCES,
+    SUBDIR_RESOURCE_IRON,
+    SUBDIR_RESOURCE_HORSES,
+    SUBDIR_RESOURCE_GOLD,
+    SUBDIR_RESOURCE_GEMS,
+    SUBDIR_RESOURCE_SPICES,
+    SUBDIR_RESOURCE_WINE,
+    SUBDIR_RESOURCE_WHEAT,
+    SUBDIR_RESOURCE_FISH,
+    SUBDIR_RESOURCE_STONE,
 ];
 
 // ------------- Directory preparation -------------
@@ -113,6 +134,7 @@ pub(crate) fn write_world_outputs(
     let climate = &world.climate;
     let hydrology = &world.hydrology;
     let biomes = &world.biomes;
+    let resources = &world.resources;
 
     write_seeds(tectonics, base_dir, label)?;
     write_plate_map(tectonics, base_dir, label, hex_size)?;
@@ -143,9 +165,11 @@ pub(crate) fn write_world_outputs(
     )?;
     write_biomes(biomes, base_dir, label, hex_size)?;
     write_forest_density(biomes, base_dir, label)?;
+    write_resources(resources, base_dir, label, hex_size)?;
     log_climate_stats(tectonics, climate);
     log_hydrology_stats(hydrology);
     log_biome_stats(biomes);
+    log_resource_stats(resources);
     Ok(())
 }
 
@@ -634,6 +658,70 @@ fn biome_to_f32(biome: Option<Biome>) -> f32 {
     }
 }
 
+// ------------- Per-output helpers (resources) -------------
+
+fn write_resources(
+    resources: &ResourceData,
+    base_dir: &Path,
+    label: &str,
+    hex_size: u32,
+) -> Result<()> {
+    let combined_path = base_dir.join(SUBDIR_RESOURCES).join(format!("{label}.png"));
+    dump_field_hex(
+        &resources.resource,
+        &combined_path,
+        resource_to_f32,
+        &ResourceCmap,
+        hex_size,
+    )
+    .with_context(|| format!("failed to write {}", combined_path.display()))?;
+
+    for &resource in ResourceId::ALL {
+        let path = base_dir
+            .join(resource_subdir(resource))
+            .join(format!("{label}.png"));
+        dump_field_pixels(
+            &resources.resource,
+            &path,
+            |tile| {
+                if tile == Some(resource) { 1.0 } else { 0.0 }
+            },
+            &Grayscale,
+        )
+        .with_context(|| format!("failed to write {}", path.display()))?;
+    }
+    Ok(())
+}
+
+fn resource_to_f32(resource: Option<ResourceId>) -> f32 {
+    match resource {
+        None => 0.0,
+        Some(ResourceId::Iron) => 1.0,
+        Some(ResourceId::Horses) => 2.0,
+        Some(ResourceId::Gold) => 3.0,
+        Some(ResourceId::Gems) => 4.0,
+        Some(ResourceId::Spices) => 5.0,
+        Some(ResourceId::Wine) => 6.0,
+        Some(ResourceId::Wheat) => 7.0,
+        Some(ResourceId::Fish) => 8.0,
+        Some(ResourceId::Stone) => 9.0,
+    }
+}
+
+fn resource_subdir(resource: ResourceId) -> &'static str {
+    match resource {
+        ResourceId::Iron => SUBDIR_RESOURCE_IRON,
+        ResourceId::Horses => SUBDIR_RESOURCE_HORSES,
+        ResourceId::Gold => SUBDIR_RESOURCE_GOLD,
+        ResourceId::Gems => SUBDIR_RESOURCE_GEMS,
+        ResourceId::Spices => SUBDIR_RESOURCE_SPICES,
+        ResourceId::Wine => SUBDIR_RESOURCE_WINE,
+        ResourceId::Wheat => SUBDIR_RESOURCE_WHEAT,
+        ResourceId::Fish => SUBDIR_RESOURCE_FISH,
+        ResourceId::Stone => SUBDIR_RESOURCE_STONE,
+    }
+}
+
 const LAKE_COLOR: [u8; 3] = [0, 170, 170];
 const RIVER_COLOR: [u8; 3] = [255, 105, 180];
 const MAJOR_RIVER_COLOR: [u8; 3] = [130, 70, 210];
@@ -772,5 +860,45 @@ fn log_biome_stats(biomes: &BiomeData) {
         tundra_count,
         unassigned_count,
         "biome stats"
+    );
+}
+
+fn log_resource_stats(resources: &ResourceData) {
+    let mut iron_count = 0_usize;
+    let mut horses_count = 0_usize;
+    let mut gold_count = 0_usize;
+    let mut gems_count = 0_usize;
+    let mut spices_count = 0_usize;
+    let mut wine_count = 0_usize;
+    let mut wheat_count = 0_usize;
+    let mut fish_count = 0_usize;
+    let mut stone_count = 0_usize;
+
+    for &resource in resources.resource.as_slice() {
+        match resource {
+            None => {}
+            Some(ResourceId::Iron) => iron_count += 1,
+            Some(ResourceId::Horses) => horses_count += 1,
+            Some(ResourceId::Gold) => gold_count += 1,
+            Some(ResourceId::Gems) => gems_count += 1,
+            Some(ResourceId::Spices) => spices_count += 1,
+            Some(ResourceId::Wine) => wine_count += 1,
+            Some(ResourceId::Wheat) => wheat_count += 1,
+            Some(ResourceId::Fish) => fish_count += 1,
+            Some(ResourceId::Stone) => stone_count += 1,
+        }
+    }
+
+    info!(
+        iron_count,
+        horses_count,
+        gold_count,
+        gems_count,
+        spices_count,
+        wine_count,
+        wheat_count,
+        fish_count,
+        stone_count,
+        "resource stats"
     );
 }

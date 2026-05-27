@@ -11,7 +11,8 @@ use clap::Parser;
 use rayon::prelude::*;
 use tracing::info;
 use worldgen::{
-    BasicParams, BiomeParams, TectonicsParams, TuningParams, WorldParams, generate_world,
+    BasicParams, BiomeParams, ResourceParams, TectonicsParams, TuningParams, WorldParams,
+    generate_world,
 };
 
 use crate::output;
@@ -242,6 +243,20 @@ fn set_biome_param(biomes: &mut BiomeParams, name: &str, value: f64) -> Result<b
     Ok(true)
 }
 
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss
+)]
+fn set_resource_param(resources: &mut ResourceParams, name: &str, value: f64) -> bool {
+    match name {
+        "cluster_expansion_attempts" => resources.cluster_expansion_attempts = value.round() as u8,
+        "poisson_max_attempts" => resources.poisson_max_attempts = value.round() as u8,
+        _ => return false,
+    }
+    true
+}
+
 /// Sets a single scalar field of `tuning` by its `snake_case` name.
 ///
 /// Vec and bool fields cannot be swept as scalars; provide them via a
@@ -261,6 +276,9 @@ pub(crate) fn set_param(tuning: &mut TuningParams, name: &str, value: f64) -> Re
         return Ok(());
     }
     if set_biome_param(&mut tuning.biomes, name, value)? {
+        return Ok(());
+    }
+    if set_resource_param(&mut tuning.resources, name, value) {
         return Ok(());
     }
 
@@ -322,7 +340,8 @@ pub(crate) fn set_param(tuning: &mut TuningParams, name: &str, value: f64) -> Re
              major_river_flow_threshold, floodplain_elevation_tolerance, \
              canyon_flow_slope_threshold, canyon_depth\n\
              Biomes: hydrology_override_strength, smoothing_passes, \
-             forest_noise_frequency, forest_noise_amplitude"
+             forest_noise_frequency, forest_noise_amplitude\n\
+             Resources: cluster_expansion_attempts, poisson_max_attempts"
         ),
     }
     Ok(())

@@ -60,6 +60,11 @@
 //!
 //! - `34_01_biomes_hex.png` — categorical biome map.
 //! - `34_06_forest_density_px.png` — forest-density feature field.
+//!
+//! ## Stage 3.5 — Resources
+//!
+//! - `35_01_resources_hex.png` — categorical combined resource map.
+//! - `35_02_resource_<name>_px.png` — binary overlay for each resource.
 
 use std::path::Path;
 use std::path::PathBuf;
@@ -69,10 +74,11 @@ use clap::{Parser, ValueEnum};
 use tracing::info;
 use worldgen::{
     BasicParams, Biome, BiomeData, BoundaryType, ClimateData, Direction, Field, HydrologyData,
-    MapSize, RiverSize, TectonicData, TuningParams, WorldParams,
+    MapSize, ResourceData, ResourceId, RiverSize, TectonicData, TuningParams, WorldParams,
     debug_viz::{
-        BiomeCmap, BoundaryCmap, Categorical, Colormap, Grayscale, HeightLevelCmap, Viridis,
-        dump_field_hex, dump_field_pixels, dump_field_with_seed_overlay, dump_rgb_field_hex,
+        BiomeCmap, BoundaryCmap, Categorical, Colormap, Grayscale, HeightLevelCmap, ResourceCmap,
+        Viridis, dump_field_hex, dump_field_pixels, dump_field_with_seed_overlay,
+        dump_rgb_field_hex,
     },
     generate_world,
 };
@@ -136,6 +142,7 @@ fn main() -> Result<()> {
         args.hex_size,
     )?;
     write_biomes(&world.biomes, &args.output, args.hex_size)?;
+    write_resources(&world.resources, &args.output, args.hex_size)?;
 
     info!("done");
     Ok(())
@@ -659,6 +666,66 @@ fn biome_to_f32(biome: Option<Biome>) -> f32 {
         Some(Biome::Grassland) => 4.0,
         Some(Biome::Desert) => 5.0,
         Some(Biome::Tundra) => 6.0,
+    }
+}
+
+// ------------- Output helpers (resources) -------------
+
+fn write_resources(resources: &ResourceData, output: &Path, hex_size: u32) -> Result<()> {
+    let combined_path = output.join("35_01_resources_hex.png");
+    info!(path = %combined_path.display(), "writing resources PNG");
+    dump_field_hex(
+        &resources.resource,
+        &combined_path,
+        resource_to_f32,
+        &ResourceCmap,
+        hex_size,
+    )
+    .with_context(|| format!("failed to write {}", combined_path.display()))?;
+
+    for &resource in ResourceId::ALL {
+        let path = output.join(format!("35_02_resource_{}_px.png", resource_name(resource)));
+        info!(path = %path.display(), resource = ?resource, "writing resource overlay PNG");
+        dump_field_pixels(
+            &resources.resource,
+            &path,
+            |tile| {
+                if tile == Some(resource) { 1.0 } else { 0.0 }
+            },
+            &Grayscale,
+        )
+        .with_context(|| format!("failed to write {}", path.display()))?;
+    }
+
+    Ok(())
+}
+
+fn resource_to_f32(resource: Option<ResourceId>) -> f32 {
+    match resource {
+        None => 0.0,
+        Some(ResourceId::Iron) => 1.0,
+        Some(ResourceId::Horses) => 2.0,
+        Some(ResourceId::Gold) => 3.0,
+        Some(ResourceId::Gems) => 4.0,
+        Some(ResourceId::Spices) => 5.0,
+        Some(ResourceId::Wine) => 6.0,
+        Some(ResourceId::Wheat) => 7.0,
+        Some(ResourceId::Fish) => 8.0,
+        Some(ResourceId::Stone) => 9.0,
+    }
+}
+
+fn resource_name(resource: ResourceId) -> &'static str {
+    match resource {
+        ResourceId::Iron => "iron",
+        ResourceId::Horses => "horses",
+        ResourceId::Gold => "gold",
+        ResourceId::Gems => "gems",
+        ResourceId::Spices => "spices",
+        ResourceId::Wine => "wine",
+        ResourceId::Wheat => "wheat",
+        ResourceId::Fish => "fish",
+        ResourceId::Stone => "stone",
     }
 }
 
