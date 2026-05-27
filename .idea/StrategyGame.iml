@@ -11,6 +11,7 @@
       <sourceFolder url="file://$MODULE_DIR$/crates/det_rng/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/worldgen/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/tools/maptest/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/tools/maprender/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />

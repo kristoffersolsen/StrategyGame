@@ -7,7 +7,8 @@ It is updated at each stage gate as new structure is added.
 For *why* the architecture is this way, see `docs/design/overview.md`.
 For *when* decisions were made, see `documents/adr/`.
 
-**Current stage:** Stage 3.2 complete. Stage 3.3 (hydrology) next.
+**Current stage:** Stage P1 map rendering implemented; interactive
+performance gate measurements pending.
 
 ---
 
@@ -16,9 +17,10 @@ crates/ \
 coords/     — wrap-aware hexagonal coordinate math (no dependencies) \
 det_rng/    — deterministic RNG primitives (no project dependencies) \
 worldgen/   — procedural world generation pipeline (depends on coords, det_rng) \
-game/       — Bevy application and runtime (depends on coords, worldgen, det_rng) \
+game/       — Bevy application and runtime (depends on coords, worldgen) \
 tools/ \
 mapdump/    — CLI: dump a single seed's generation output to PNG \
+maprender/  — Bevy app: interactive map rendering performance gate \
 maptest/    — CLI: multi-seed runs and parameter-range sweeps (rayon parallel)
 
 ## Crate responsibilities
@@ -52,8 +54,8 @@ resources, starting positions. Takes a seed and [`WorldParams`],
 produces [`WorldData`]. Runs standalone (used by both tools) and is
 loaded by `game` at world creation time.
 
-Stage 3.1 (tectonics) and Stage 3.2 (climate) are complete. Stage 3.3
-(hydrology) is next.
+Stages 3.1 through 3.5 are complete. Starting locations are still
+deferred.
 
 `TectonicsParams` (and all `WorldParams` tuning structs) derive
 `serde::Serialize` / `serde::Deserialize` so they can be loaded from
@@ -69,7 +71,22 @@ The Bevy application. Owns the ECS world, plugin registration, systems,
 and all runtime logic. Reads `WorldData` from `worldgen` to spawn
 entities at game start.
 
-Currently a stub; implementation begins in Stage 4.
+Stage P1 adds the static map rendering foundation:
+
+- `RenderingPlugin` registered from `main.rs`.
+- Chunked 16x16 pointy-top hex terrain meshes built from `WorldData`.
+- P1 vertex-colour terrain lookup for ocean, coast, mountains, hills,
+  biomes, and river tinting.
+- `RenderStartupConfig`, which selects world-generation parameters and
+  terrain renderer implementation at startup.
+- `TerrainRenderer`, currently supporting `VertexColor` and reserving
+  `TextureArray` for P2.
+- A `Camera2d` map camera with WASD/arrow-key pan and scroll-wheel zoom.
+- A Bevy diagnostics text overlay showing FPS and frame time.
+
+The production binary currently inserts the default render startup
+configuration. Render performance gates and parameter edits are owned by
+the `maprender` tool, not by hardcoded game startup.
 
 ### `mapdump` (tool)
 
@@ -93,14 +110,25 @@ Both subcommands accept `--params <file.ron>` to load base parameters
 from a RON preset file. Preset files live in `tools/maptest/presets/`.
 See `tools/maptest/README.md` for full usage.
 
+### `maprender` (tool)
+
+A Bevy executable for interactive terrain-rendering performance gates.
+It uses the reusable `game::rendering` plugin and loads a RON preset
+from `tools/maprender/presets/`. Presets select seed, map size, terrain
+renderer implementation, and `worldgen::TuningParams`.
+
+P1 uses `renderer: VertexColor`. P2 will add the texture-array renderer
+behind the same preset field so test runs can switch rendering pipelines
+without changing the game crate startup architecture.
+
 ---
 
 ## Dependency graph
 game     ──► coords \
 ──► worldgen ──► coords \
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└──► det_rng \
-──► det_rng \
 mapdump  ──► worldgen ──► (above) \
+maprender ─► game ──► worldgen ──► (above) \
 maptest  ──► worldgen ──► (above)
 
 No cycles. `coords` and `det_rng` have zero project dependencies.
@@ -135,5 +163,15 @@ No cycles. `coords` and `det_rng` have zero project dependencies.
   `maptest sweep` runs parallel (value, seed) grids via `rayon`. This
   pattern scales to future generation stages without any tool changes.
   See ADR-0003 for the full rationale.
+
+- **Chunked static terrain rendering** — the game crate renders generated
+  terrain as one 2D mesh entity per 16x16 tile chunk. This keeps entity
+  count and draw calls low while preserving a future rebuild boundary for
+  terrain changes. See ADR-0018.
+
+- **Rendering gates live in tool crates** — renderer performance tests
+  run through `tools/maprender` with RON presets. The game crate exposes
+  reusable rendering plugins and startup configuration rather than
+  hardcoding test worlds in production startup.
 
 For the full decision history, see `documents/adr/`.
