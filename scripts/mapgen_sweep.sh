@@ -2,12 +2,18 @@
 set -euo pipefail
 
 #PARAM=target_plate_count
+#PARAM=plate_growth_rate_range
+PARAM=clumping_index
 
 #PARAM=detail_noise_amplitude
 #PARAM=detail_noise_frequency
 #PARAM=detail_noise_octaves
 
 #PARAM=boundary_falloff_sigma
+#PARAM=boundary_strength_noise_amplitude
+#PARAM=boundary_strength_noise_frequency
+#PARAM=boundary_sigma_noise_amplitude
+#PARAM=boundary_sigma_noise_frequency
 
 #PARAM=mountain_elevation_boost
 
@@ -19,11 +25,11 @@ set -euo pipefail
 #PARAM=wind_amplitude
 
 #PARAM=river_flow_threshold
-PARAM=lake_basin_area_threshold
+#PARAM=lake_basin_area_threshold
 #PARAM=major_river_flow_threshold
 
-MIN=10
-MAX=100
+MIN=0
+MAX=1
 STEPS=10
 SEEDS=6  # run seeds 1..SEEDS
 

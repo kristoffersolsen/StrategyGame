@@ -24,12 +24,23 @@
 //! distribution and sampled via a single `f32` draw, avoiding any
 //! heap allocation per plate.
 
+use coords::{Direction, MapBounds};
 use rand::RngExt;
 use std::f32::consts::TAU;
 
+use crate::Field;
 use crate::params::TectonicsParams;
 use crate::rng::StageRng;
-use crate::world_data::{MineralCharacter, MotionVector, Plate, PlateType};
+use crate::world_data::{MineralCharacter, MotionVector, Plate, PlateId, PlateType};
+
+// ------------- Algorithm constants -------------
+
+/// Number of local-majority smoothing passes used for plate-type clumping.
+const CLUMPING_PASS_COUNT: u8 = 3;
+
+/// Half-neighbour direction set used to count plate adjacencies once.
+const ADJACENCY_DIRECTIONS: [Direction; 3] =
+    [Direction::East, Direction::SouthEast, Direction::SouthWest];
 
 /// Assigns type, motion vector, and mineral character to each plate.
 ///
@@ -58,6 +69,88 @@ pub(crate) fn assign_plate_properties(
             mineral_character: sample_mineral(&mineral_cdf, rng),
         })
         .collect()
+}
+
+/// Clumps oceanic and continental plate types across the plate adjacency graph.
+///
+/// The initial type assignment is independent per plate. This pass
+/// optionally smooths those assignments by letting a plate adopt the
+/// majority type of its adjacent plates. `clumping_index = 0.0` is a
+/// strict no-op and consumes no RNG, preserving the original output.
+pub(crate) fn clump_plate_types(
+    bounds: MapBounds,
+    plate_id: &Field<PlateId>,
+    plates: &mut [Plate],
+    params: &TectonicsParams,
+    rng: &mut StageRng,
+) {
+    if params.clumping_index <= 0.0 || plates.len() <= 1 {
+        return;
+    }
+
+    for _ in 0..CLUMPING_PASS_COUNT {
+        let neighbor_counts = plate_type_neighbor_counts(bounds, plate_id, plates);
+        let mut next_types: Vec<PlateType> = plates.iter().map(|plate| plate.plate_type).collect();
+
+        for (plate_index, counts) in neighbor_counts.iter().enumerate() {
+            let current = plates[plate_index].plate_type;
+            let Some(majority) = majority_type(*counts) else {
+                continue;
+            };
+            if majority == current {
+                continue;
+            }
+            if rng.random_bool(f64::from(params.clumping_index)) {
+                next_types[plate_index] = majority;
+            }
+        }
+
+        for (plate, next_type) in plates.iter_mut().zip(next_types) {
+            plate.plate_type = next_type;
+        }
+    }
+}
+
+fn plate_type_neighbor_counts(
+    bounds: MapBounds,
+    plate_id: &Field<PlateId>,
+    plates: &[Plate],
+) -> Vec<[u32; 2]> {
+    let mut counts = vec![[0_u32; 2]; plates.len()];
+
+    for (coord, &own_id) in plate_id.iter_coords() {
+        for direction in ADJACENCY_DIRECTIONS {
+            let Some(neighbor) = bounds.neighbor(coord, direction) else {
+                continue;
+            };
+            let other_id = plate_id[neighbor];
+            if own_id == other_id {
+                continue;
+            }
+
+            let own_index = usize::from(own_id);
+            let other_index = usize::from(other_id);
+            counts[own_index][plate_type_index(plates[other_index].plate_type)] += 1;
+            counts[other_index][plate_type_index(plates[own_index].plate_type)] += 1;
+        }
+    }
+
+    counts
+}
+
+fn majority_type(counts: [u32; 2]) -> Option<PlateType> {
+    match counts {
+        [continental, oceanic] if continental > oceanic => Some(PlateType::Continental),
+        [continental, oceanic] if oceanic > continental => Some(PlateType::Oceanic),
+        _ => None,
+    }
+}
+
+fn plate_type_index(plate_type: PlateType) -> usize {
+    match plate_type {
+        PlateType::Continental => 0,
+        PlateType::Oceanic => 1,
+    }
 }
 
 // ------------- Plate type -------------
@@ -160,6 +253,14 @@ mod tests {
 
     fn default_params() -> TectonicsParams {
         TectonicsParams::defaults()
+    }
+
+    fn plate(plate_type: PlateType) -> Plate {
+        Plate {
+            plate_type,
+            motion: MotionVector { dx: 0.0, dy: 0.0 },
+            mineral_character: MineralCharacter::Ferrous,
+        }
     }
 
     // ------------- Basic properties -------------
@@ -345,6 +446,57 @@ mod tests {
                     "only Gems should be sampled when its weight is 1 and others are 0"
                 );
             }
+        }
+    }
+
+    // ------------- Plate type clumping -------------
+
+    mod plate_type_clumping {
+        use super::*;
+        use coords::MapBounds;
+
+        #[test]
+        fn zero_clumping_index_is_noop() {
+            let bounds = MapBounds::new(3, 3);
+            let plate_id = Field::from_fn(bounds, |coord| {
+                PlateId::try_from(coord.q).expect("test coord q fits in PlateId")
+            });
+            let mut plates = vec![
+                plate(PlateType::Continental),
+                plate(PlateType::Oceanic),
+                plate(PlateType::Continental),
+            ];
+            let original_types: Vec<PlateType> =
+                plates.iter().map(|plate| plate.plate_type).collect();
+            let mut rng = rng(42);
+
+            clump_plate_types(bounds, &plate_id, &mut plates, &default_params(), &mut rng);
+
+            let clumped_types: Vec<PlateType> =
+                plates.iter().map(|plate| plate.plate_type).collect();
+            assert_eq!(clumped_types, original_types);
+        }
+
+        #[test]
+        fn full_clumping_adopts_neighbor_majority_type() {
+            let bounds = MapBounds::new(3, 3);
+            let plate_id = Field::from_fn(bounds, |coord| {
+                PlateId::try_from(coord.q).expect("test coord q fits in PlateId")
+            });
+            let mut plates = vec![
+                plate(PlateType::Continental),
+                plate(PlateType::Oceanic),
+                plate(PlateType::Continental),
+            ];
+            let params = TectonicsParams {
+                clumping_index: 1.0,
+                ..TectonicsParams::defaults()
+            };
+            let mut rng = rng(42);
+
+            clump_plate_types(bounds, &plate_id, &mut plates, &params, &mut rng);
+
+            assert_eq!(plates[1].plate_type, PlateType::Continental);
         }
     }
 }

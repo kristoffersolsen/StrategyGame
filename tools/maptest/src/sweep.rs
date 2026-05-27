@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use rayon::prelude::*;
 use tracing::info;
-use worldgen::{BasicParams, TuningParams, WorldParams, generate_world};
+use worldgen::{BasicParams, TectonicsParams, TuningParams, WorldParams, generate_world};
 
 use crate::output;
 
@@ -163,26 +163,13 @@ fn linspace(min: f64, max: f64, steps: usize) -> Vec<f64> {
 
 // ------------- Field assignment by name -------------
 
-/// Sets a single scalar field of `tuning` by its `snake_case` name.
-///
-/// Vec and bool fields cannot be swept as scalars; provide them via a
-/// `--params` config file instead.
-///
-/// # Errors
-///
-/// Returns an error if `name` is unknown, is a non-scalar field, or if
-/// the value is out of range for the field's type.
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_precision_loss,
     clippy::cast_sign_loss
 )]
-pub(crate) fn set_param(tuning: &mut TuningParams, name: &str, value: f64) -> Result<()> {
-    let t = &mut tuning.tectonics;
-    let c = &mut tuning.climate;
-    let h = &mut tuning.hydrology;
+fn set_tectonics_param(t: &mut TectonicsParams, name: &str, value: f64) -> Result<bool> {
     match name {
-        // ---------- TectonicsParams ----------
         // Integer fields — round before casting.
         "target_plate_count" => t.target_plate_count = value.round() as u8,
         "land_level_count" => t.land_level_count = value.round() as u8,
@@ -191,12 +178,22 @@ pub(crate) fn set_param(tuning: &mut TuningParams, name: &str, value: f64) -> Re
         // f32 fields.
         "motion_magnitude_min" => t.motion_magnitude_min = value as f32,
         "motion_magnitude_max" => t.motion_magnitude_max = value as f32,
+        "plate_growth_rate_range" => t.plate_growth_rate_range = value as f32,
+        "clumping_index" => t.clumping_index = value as f32,
         "convergence_threshold" => t.convergence_threshold = value as f32,
         "continental_base_elevation" => t.continental_base_elevation = value as f32,
         "oceanic_base_elevation" => t.oceanic_base_elevation = value as f32,
         "intra_plate_noise_amplitude" => t.intra_plate_noise_amplitude = value as f32,
         "intra_plate_noise_frequency" => t.intra_plate_noise_frequency = value as f32,
         "boundary_falloff_sigma" => t.boundary_falloff_sigma = value as f32,
+        "boundary_strength_noise_amplitude" => {
+            t.boundary_strength_noise_amplitude = value as f32;
+        }
+        "boundary_strength_noise_frequency" => {
+            t.boundary_strength_noise_frequency = value as f32;
+        }
+        "boundary_sigma_noise_amplitude" => t.boundary_sigma_noise_amplitude = value as f32,
+        "boundary_sigma_noise_frequency" => t.boundary_sigma_noise_frequency = value as f32,
         "mountain_elevation_boost" => t.mountain_elevation_boost = value as f32,
         "coastal_mountain_boost" => t.coastal_mountain_boost = value as f32,
         "subduction_trench_penalty" => t.subduction_trench_penalty = value as f32,
@@ -220,7 +217,33 @@ pub(crate) fn set_param(tuning: &mut TuningParams, name: &str, value: f64) -> Re
         "mountain_pass_min_mountain_neighbors" => {
             t.mountain_pass_min_mountain_neighbors = value.round().clamp(0.0, 6.0) as u8;
         }
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
 
+/// Sets a single scalar field of `tuning` by its `snake_case` name.
+///
+/// Vec and bool fields cannot be swept as scalars; provide them via a
+/// `--params` config file instead.
+///
+/// # Errors
+///
+/// Returns an error if `name` is unknown, is a non-scalar field, or if
+/// the value is out of range for the field's type.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss
+)]
+pub(crate) fn set_param(tuning: &mut TuningParams, name: &str, value: f64) -> Result<()> {
+    if set_tectonics_param(&mut tuning.tectonics, name, value)? {
+        return Ok(());
+    }
+
+    let c = &mut tuning.climate;
+    let h = &mut tuning.hydrology;
+    match name {
         // ---------- ClimateParams ----------
         "equator_temperature" => c.equator_temperature = value as f32,
         "pole_temperature" => c.pole_temperature = value as f32,
@@ -255,8 +278,11 @@ pub(crate) fn set_param(tuning: &mut TuningParams, name: &str, value: f64) -> Re
         _ => anyhow::bail!(
             "unknown TuningParams field: `{name}`\n\
              Tectonics: target_plate_count, motion_magnitude_min, motion_magnitude_max, \
-             convergence_threshold, continental_base_elevation, oceanic_base_elevation, \
+             plate_growth_rate_range, clumping_index, convergence_threshold, \
+             continental_base_elevation, oceanic_base_elevation, \
              intra_plate_noise_amplitude, intra_plate_noise_frequency, boundary_falloff_sigma, \
+             boundary_strength_noise_amplitude, boundary_strength_noise_frequency, \
+             boundary_sigma_noise_amplitude, boundary_sigma_noise_frequency, \
              mountain_elevation_boost, coastal_mountain_boost, subduction_trench_penalty, \
              island_arc_boost, rift_valley_penalty, mid_ocean_ridge_boost, \
              detail_noise_amplitude, detail_noise_frequency, detail_noise_octaves, \

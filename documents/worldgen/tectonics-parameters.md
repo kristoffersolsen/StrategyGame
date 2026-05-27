@@ -171,6 +171,42 @@ rougher edges. Raising sigma also raises the total elevation added to
 boundary tiles, inflating how many tiles reach the mountain threshold —
 compensate by lowering `mountain_elevation_boost` proportionally.
 
+### `boundary_strength_noise_amplitude` / `boundary_strength_noise_frequency`
+
+| | Amplitude | Frequency |
+|---|---|---|
+| Type | `f32` | `f32` |
+| Struct default | `0.0` | `3.0` |
+| Preset default | `0.0` | `3.0` |
+| Constraint | `0.0`–`1.0` | `> 0.0` |
+
+Coherent noise applied once per tectonic boundary source tile before its
+modifier is propagated. The noise is evaluated only at boundary sources,
+so it behaves like variation along the boundary: high sections emit the
+full uplift or depression, while low sections fade toward gaps.
+
+**Tuning:** Raise amplitude to break continuous mountain walls and island
+arcs into chains. Raise frequency for shorter, more frequent gaps; lower
+frequency for long range-scale segments. At amplitude `0.0`, this path is
+an exact no-op.
+
+### `boundary_sigma_noise_amplitude` / `boundary_sigma_noise_frequency`
+
+| | Amplitude | Frequency |
+|---|---|---|
+| Type | `f32` | `f32` |
+| Struct default | `0.0` | `3.0` |
+| Preset default | `0.0` | `3.0` |
+| Constraint | `0.0`–`1.0` | `> 0.0` |
+
+Coherent noise applied once per tectonic boundary source tile to vary its
+local Gaussian falloff width. This approximates orthogonal variation
+without computing explicit boundary tangent/normal geometry.
+
+**Tuning:** Raise amplitude to mix narrow sharp sections with broader
+diffuse sections. Raise frequency for rapidly changing range width. Local
+sigma is clamped internally so propagation radius stays bounded.
+
 ### `mountain_elevation_boost`
 
 | | |
@@ -245,6 +281,10 @@ the ratio of the mountain boost to the trench penalty — too small and
 mountains/trenches are indistinct; too large and the quantile pass
 reassigns most tiles to mountain. The preset values produce visible but
 not dominant mountain chains at `boundary_falloff_sigma = 1.0`.
+Use `boundary_strength_noise_amplitude` to break those chains into gaps
+before reaching for `mountain_pass_threshold`, because boundary noise
+changes the continuous elevation field while mountain-pass carving works
+after quantization.
 
 ### `detail_noise_amplitude` / `detail_noise_frequency` / `detail_noise_octaves`
 

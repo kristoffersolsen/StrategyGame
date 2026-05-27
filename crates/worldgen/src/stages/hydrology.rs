@@ -42,6 +42,7 @@ pub(crate) fn run(
         elevation,
         height_level,
         is_lake,
+        lake_outlet,
     } = basin::resolve_basins(
         bounds,
         &tectonics.elevation,
@@ -60,6 +61,7 @@ pub(crate) fn run(
         &elevation,
         &height_level,
         &is_lake,
+        &lake_outlet,
         &climate.precipitation,
     );
 
@@ -89,6 +91,7 @@ pub(crate) fn run(
         flow_direction,
         flow_accumulation,
         is_lake,
+        lake_outlet,
         river_size,
         is_floodplain,
         is_canyon,

@@ -9,6 +9,8 @@
         motion_magnitude_min: 0.5,
         motion_magnitude_max: 1.5,
         mineral_weights: [4.0, 2.0, 1.0, 3.0, 4.0],
+        plate_growth_rate_range: 1.0,
+        clumping_index: 0.0,
 
         // Step 5 — Boundary classification
         convergence_threshold: 0.3,
@@ -19,6 +21,10 @@
         intra_plate_noise_amplitude: 0.2,
         intra_plate_noise_frequency: 2.0,
         boundary_falloff_sigma: 2.0, // how wide mountain ranges become from the plate borders
+        boundary_strength_noise_amplitude: 0.0,
+        boundary_strength_noise_frequency: 3.0,
+        boundary_sigma_noise_amplitude: 0.0,
+        boundary_sigma_noise_frequency: 3.0,
         mountain_elevation_boost: 0.3,
         coastal_mountain_boost: 0.1,
         subduction_trench_penalty: -0.8,

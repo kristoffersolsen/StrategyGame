@@ -141,11 +141,14 @@ starting point for new presets.
 All scalar fields of `TectonicsParams` can be passed to `--param`:
 
 ```
-target_plate_count            boundary_perturbation_amplitude
-motion_magnitude_min          motion_magnitude_max
-convergence_threshold         continental_base_elevation
-oceanic_base_elevation        intra_plate_noise_amplitude
-intra_plate_noise_frequency   boundary_falloff_sigma
+target_plate_count            plate_growth_rate_range
+clumping_index                motion_magnitude_min
+motion_magnitude_max          convergence_threshold
+continental_base_elevation    oceanic_base_elevation
+intra_plate_noise_amplitude   intra_plate_noise_frequency
+boundary_falloff_sigma        boundary_strength_noise_amplitude
+boundary_strength_noise_frequency boundary_sigma_noise_amplitude
+boundary_sigma_noise_frequency
 mountain_elevation_boost      coastal_mountain_boost
 subduction_trench_penalty     island_arc_boost
 rift_valley_penalty           mid_ocean_ridge_boost

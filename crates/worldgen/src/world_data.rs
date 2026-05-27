@@ -314,6 +314,14 @@ pub struct HydrologyData {
     /// Tiles marked as inland lakes by basin resolution.
     pub is_lake: Field<bool>,
 
+    /// Spill-point outlet coordinate for each lake tile.
+    ///
+    /// `Some(coord)` is the first land tile outside the lake basin where
+    /// accumulated flow exits.  `None` means the lake is a true sink (no
+    /// outside neighbor — fully enclosed map edge case).  Non-lake tiles
+    /// always hold `None`.
+    pub lake_outlet: Field<Option<Coord>>,
+
     /// River classification for each tile, if accumulated flow crosses
     /// the configured river threshold.
     pub river_size: Field<Option<RiverSize>>,
@@ -344,6 +352,7 @@ impl HydrologyData {
             flow_direction: Field::filled(bounds, None),
             flow_accumulation: Field::filled(bounds, 0.0),
             is_lake: Field::filled(bounds, false),
+            lake_outlet: Field::filled(bounds, None),
             river_size: Field::filled(bounds, None),
             is_floodplain: Field::filled(bounds, false),
             is_canyon: Field::filled(bounds, false),

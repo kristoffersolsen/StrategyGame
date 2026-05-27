@@ -36,6 +36,12 @@ pub(crate) struct ResolvedBasins {
     pub(crate) height_level: Field<u8>,
     /// Lake tiles produced from large basins.
     pub(crate) is_lake: Field<bool>,
+    /// Spill-point outlet for each lake tile.
+    ///
+    /// `Some(coord)` gives the land tile immediately outside the basin
+    /// where accumulated lake flow exits.  `None` means the lake is a
+    /// true sink (no outside neighbor found — fully enclosed edge case).
+    pub(crate) lake_outlet: Field<Option<Coord>>,
 }
 
 /// Detects all land basins that terminate in an initial sink tile.
@@ -73,6 +79,7 @@ pub(crate) fn resolve_basins(
     let mut resolved_elevation = elevation.clone();
     let mut resolved_height = height_level.clone();
     let mut is_lake = Field::filled(bounds, false);
+    let mut lake_outlet: Field<Option<Coord>> = Field::filled(bounds, None);
 
     for basin in basins {
         let Some(spill) = basin.spill else {
@@ -84,8 +91,10 @@ pub(crate) fn resolve_basins(
             mark_lake_below_spill(
                 &mut resolved_height,
                 &mut is_lake,
+                &mut lake_outlet,
                 basin,
                 spill.elevation,
+                spill.outside,
                 elevation,
                 height_level,
             );
@@ -104,6 +113,7 @@ pub(crate) fn resolve_basins(
         elevation: resolved_elevation,
         height_level: resolved_height,
         is_lake,
+        lake_outlet,
     }
 }
 
@@ -240,17 +250,24 @@ fn mark_lake(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+// All eight parameters are genuinely distinct output fields or read-only
+// inputs; collapsing them into a struct would be premature abstraction for
+// a private function called from one site.
 fn mark_lake_below_spill(
     height_level: &mut Field<u8>,
     is_lake: &mut Field<bool>,
+    lake_outlet: &mut Field<Option<Coord>>,
     basin: &Basin,
     spill_elevation: f32,
+    outlet: Coord,
     elevation: &Field<f32>,
     original_height: &Field<u8>,
 ) {
     for &coord in &basin.tiles {
         if original_height[coord] > 1 && elevation[coord] < spill_elevation {
             is_lake.set(coord, true);
+            lake_outlet.set(coord, Some(outlet));
             height_level.set(coord, 1);
         }
     }

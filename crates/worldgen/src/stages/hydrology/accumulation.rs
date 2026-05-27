@@ -5,12 +5,17 @@ use coords::{Coord, Direction, MapBounds};
 use crate::Field;
 
 /// Accumulates precipitation along the resolved single-flow drainage graph.
+///
+/// Lake tiles with a non-`None` outlet push their accumulated flow into
+/// the outlet tile rather than stopping.  This propagates river networks
+/// through lakes to the downstream terrain.
 pub(crate) fn accumulate_flow(
     bounds: MapBounds,
     flow_direction: &Field<Option<Direction>>,
     elevation: &Field<f32>,
     height_level: &Field<u8>,
     is_lake: &Field<bool>,
+    lake_outlet: &Field<Option<Coord>>,
     precipitation: &Field<f32>,
 ) -> Field<f32> {
     let mut accumulation = precipitation.clone();
@@ -22,13 +27,17 @@ pub(crate) fn accumulate_flow(
     });
 
     for coord in coords {
-        let Some(direction) = flow_direction[coord] else {
-            continue;
-        };
-        let Some(downstream) = bounds.neighbor(coord, direction) else {
-            continue;
-        };
-        accumulation.set(downstream, accumulation[downstream] + accumulation[coord]);
+        if let Some(direction) = flow_direction[coord] {
+            let Some(downstream) = bounds.neighbor(coord, direction) else {
+                continue;
+            };
+            accumulation.set(downstream, accumulation[downstream] + accumulation[coord]);
+        } else if is_lake[coord] {
+            let Some(outlet) = lake_outlet[coord] else {
+                continue;
+            };
+            accumulation.set(outlet, accumulation[outlet] + accumulation[coord]);
+        }
     }
 
     let max_land_flow = accumulation

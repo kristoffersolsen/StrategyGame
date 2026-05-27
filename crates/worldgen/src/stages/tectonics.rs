@@ -67,10 +67,11 @@ pub(crate) fn run(
     let seeds = place_plate_seeds(bounds, params, rng);
 
     // Step 2: organic flood-fill plate growth.
-    let plate_id = growth::grow_plates_organic(bounds, &seeds, rng);
+    let plate_id = growth::grow_plates_organic(bounds, &seeds, params, rng);
 
     // Step 3: plate type, motion vector, mineral character.
-    let plates = plates::assign_plate_properties(seeds.len(), params, rng);
+    let mut plates = plates::assign_plate_properties(seeds.len(), params, rng);
+    plates::clump_plate_types(bounds, &plate_id, &mut plates, params, rng);
 
     // Step 4: boundary classification.
     let boundary_type = boundary::classify_boundaries(
@@ -84,14 +85,20 @@ pub(crate) fn run(
     // Steps 5–7: base elevation field + detail-noise overlay.
     let intra_noise_seed: u32 = rng.next_u32();
     let detail_noise_seed: u32 = rng.next_u32();
+    let boundary_noise_seed =
+        intra_noise_seed.rotate_left(13) ^ detail_noise_seed.rotate_right(7) ^ 0xA511_E9B3;
+    let elevation_noise_seeds = elevation::ElevationNoiseSeeds {
+        intra: intra_noise_seed,
+        boundary: boundary_noise_seed,
+        detail: detail_noise_seed,
+    };
     let mut elevation = elevation::build_elevation_field(
         bounds,
         &plate_id,
         &plates,
         &boundary_type,
         params,
-        intra_noise_seed,
-        detail_noise_seed,
+        elevation_noise_seeds,
     );
 
     // Step 8: sea-level correction + height-level discretisation.

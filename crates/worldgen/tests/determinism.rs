@@ -339,7 +339,7 @@ mod reference_hash {
     /// This value must be updated whenever generation output changes
     /// intentionally.
     const REFERENCE_WORLD_DATA_HASH: &str =
-        "5ab437190225fc3b435fae6f38404bcfbfbe257cf3cc1aa5aad68b02ee575c12";
+        "e44c934e8089a54fc3cf493fc6aa5dd860abb460f45fd94c5a78a7fcc0de1202";
 
     #[test]
     fn world_data_matches_committed_reference_hash() {
