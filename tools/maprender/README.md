@@ -139,12 +139,16 @@ cp tools/maprender/presets/default.ron tools/maprender/presets/large_vertex_colo
 |---|---|---|
 | `VertexColor` | `vertex-color` | Implemented. P1 baseline: flat terrain colours encoded as mesh vertex colours. |
 | `TextureArray` | `texture-array` | Implemented. P2 baseline: terrain layer indices encoded as mesh attributes and sampled from a 64x64 placeholder texture array. |
-| `Terrain3d` | `terrain-3d` | Implemented through P3.2. Terrain chunks render as 3D elevation meshes with side faces, mountain peaks, water plane, perspective camera, and lighting. |
+| `Terrain3d` | `terrain-3d` | Implemented through P3.4. Terrain chunks render as textured 3D elevation meshes with side faces, mountain peaks, water plane, orbit camera, lighting, biome-matched forest models, and resource models. |
 
 Renderer selection lives in `game::rendering::RenderStartupConfig`.
 This keeps render tests and the final game compatible: the final game can
 choose a renderer from game state, while `maprender` chooses from a RON
 preset.
+
+P3 assets are loaded from the workspace `assets/` directory. Terrain top
+textures live under `assets/worldgen/textures/`; forest and resource GLB
+models live under `assets/glb-assets/`.
 
 ---
 

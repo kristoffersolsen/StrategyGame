@@ -8,13 +8,20 @@
 //! this binary uses default startup configuration until full game-state
 //! driven world creation exists.
 
-use bevy::prelude::*;
+use bevy::{asset::AssetPlugin, prelude::*};
 use game::rendering::{RenderStartupConfig, RenderingPlugin};
 
 fn main() {
     App::new()
         .insert_resource(RenderStartupConfig::default())
-        .add_plugins(DefaultPlugins)
+        .add_plugins(DefaultPlugins.set(AssetPlugin {
+            file_path: workspace_asset_path(),
+            ..Default::default()
+        }))
         .add_plugins(RenderingPlugin)
         .run();
+}
+
+fn workspace_asset_path() -> String {
+    format!("{}/../../assets", env!("CARGO_MANIFEST_DIR"))
 }

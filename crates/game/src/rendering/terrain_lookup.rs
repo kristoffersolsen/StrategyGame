@@ -1,11 +1,20 @@
-//! Placeholder terrain lookup for P1/P2 terrain rendering.
+//! Terrain lookup and texture-array data for map rendering.
 
-use bevy::color::{ColorToComponents, LinearRgba};
+use std::path::Path;
+
+use bevy::{
+    asset::RenderAssetUsages,
+    color::{ColorToComponents, LinearRgba},
+    image::{CompressedImageFormats, Image, ImageSampler, ImageType},
+    render::render_resource::TextureFormat,
+};
 use coords::Coord;
 use worldgen::{Biome, WorldData};
 
 pub(crate) const TEXTURE_SIZE: u32 = 64;
 pub(crate) const TEXTURE_LAYER_COUNT: u32 = 18;
+pub(crate) const P3_TEXTURE_SIZE: u32 = 256;
+pub(crate) const P3_TEXTURE_LAYER_COUNT: u32 = 17;
 
 const OCEAN: LinearRgba = hex_color(0x1a, 0x3a, 0x5c);
 const COAST: LinearRgba = hex_color(0x2e, 0x6e, 0xa6);
@@ -92,6 +101,38 @@ pub(crate) fn texture_index(world: &WorldData, coord: Coord, mountain_level: u8)
     }
 }
 
+/// Returns the P3 authored texture-array layer index used for a tile top.
+pub(crate) fn p3_texture_index(world: &WorldData, coord: Coord, mountain_level: u8) -> u32 {
+    let height_level = *world
+        .tectonics
+        .height_level
+        .get(coord)
+        .expect("rendered coord must be in bounds");
+
+    match height_level {
+        0 => 0,
+        1 => 1,
+        level if level >= mountain_level => 8,
+        _ => {
+            let biome = world.biomes.biome.get(coord).copied().flatten();
+            let base = match biome.unwrap_or(Biome::Grassland) {
+                Biome::TropicalRainforest => 2,
+                Biome::TemperateForest => 3,
+                Biome::BorealForest => 4,
+                Biome::Grassland => 5,
+                Biome::Desert => 6,
+                Biome::Tundra => 7,
+            };
+
+            if is_hilly(world, coord) {
+                base + 9
+            } else {
+                base
+            }
+        }
+    }
+}
+
 /// Builds the flat-colour placeholder texture array used by the P2 renderer.
 pub(crate) fn placeholder_texture_array_data() -> Vec<u8> {
     let layer_len = usize::try_from(TEXTURE_SIZE * TEXTURE_SIZE * 4)
@@ -115,6 +156,44 @@ pub(crate) fn placeholder_texture_array_data() -> Vec<u8> {
         }
     }
 
+    data
+}
+
+/// Builds the authored terrain texture array used by the P3 renderer.
+pub(crate) fn p3_texture_array_data() -> Vec<u8> {
+    let mut layers = vec![Vec::new(); usize::try_from(P3_TEXTURE_LAYER_COUNT).unwrap()];
+
+    layers[0] = load_p3_png_layer("ocean");
+    layers[1] = load_p3_png_layer("coast");
+    layers[2] = load_p3_png_layer("tropical");
+    layers[3] = load_p3_png_layer("temperate");
+    layers[4] = load_p3_png_layer("boreal");
+    layers[5] = load_p3_png_layer("grassland");
+    layers[6] = load_p3_png_layer("desert");
+    layers[7] = load_p3_png_layer("tundra");
+    layers[8] = load_p3_png_layer("mountain");
+
+    layers[9] = darkened_layer(&layers[0], 0.82);
+    layers[10] = darkened_layer(&layers[1], 0.82);
+    layers[11] = darkened_layer(&layers[2], 0.82);
+    layers[12] = darkened_layer(&layers[3], 0.82);
+    layers[13] = darkened_layer(&layers[4], 0.82);
+    layers[14] = darkened_layer(&layers[5], 0.82);
+    layers[15] = darkened_layer(&layers[6], 0.82);
+    layers[16] = darkened_layer(&layers[7], 0.82);
+
+    let layer_len = p3_layer_len();
+    let mut data = Vec::with_capacity(
+        layer_len * usize::try_from(P3_TEXTURE_LAYER_COUNT).expect("layer count fits in usize"),
+    );
+    for layer in layers {
+        assert_eq!(
+            layer.len(),
+            layer_len,
+            "P3 terrain texture layer must be {P3_TEXTURE_SIZE}x{P3_TEXTURE_SIZE} RGBA8",
+        );
+        data.extend_from_slice(&layer);
+    }
     data
 }
 
@@ -188,6 +267,61 @@ fn rgba8(color: LinearRgba) -> [u8; 4] {
         f32_to_u8(color.blue),
         f32_to_u8(color.alpha),
     ]
+}
+
+fn load_p3_png_layer(name: &str) -> Vec<u8> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../assets/worldgen/textures")
+        .join(format!("{name}.png"));
+    let path_label = path.display().to_string();
+    let bytes = std::fs::read(&path)
+        .unwrap_or_else(|error| panic!("failed to read P3 terrain texture {path_label}: {error}"));
+    let image = Image::from_buffer(
+        &bytes,
+        ImageType::Extension("png"),
+        CompressedImageFormats::NONE,
+        true,
+        ImageSampler::Default,
+        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+    )
+    .unwrap_or_else(|error| panic!("failed to decode P3 terrain texture {path_label}: {error}"));
+
+    assert_eq!(
+        image.texture_descriptor.size.width, P3_TEXTURE_SIZE,
+        "P3 terrain texture {path_label} must be {P3_TEXTURE_SIZE}px wide",
+    );
+    assert_eq!(
+        image.texture_descriptor.size.height, P3_TEXTURE_SIZE,
+        "P3 terrain texture {path_label} must be {P3_TEXTURE_SIZE}px tall",
+    );
+    assert_eq!(
+        image.texture_descriptor.format,
+        TextureFormat::Rgba8UnormSrgb,
+        "P3 terrain texture {path_label} must decode to Rgba8UnormSrgb",
+    );
+
+    image
+        .data
+        .expect("decoded P3 terrain texture must contain CPU pixel data")
+}
+
+fn darkened_layer(layer: &[u8], factor: f32) -> Vec<u8> {
+    layer
+        .chunks_exact(4)
+        .flat_map(|pixel| {
+            [
+                f32_to_u8(f32::from(pixel[0]) / 255.0 * factor),
+                f32_to_u8(f32::from(pixel[1]) / 255.0 * factor),
+                f32_to_u8(f32::from(pixel[2]) / 255.0 * factor),
+                pixel[3],
+            ]
+        })
+        .collect()
+}
+
+fn p3_layer_len() -> usize {
+    usize::try_from(P3_TEXTURE_SIZE * P3_TEXTURE_SIZE * 4)
+        .expect("P3 texture layer size fits in usize")
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]

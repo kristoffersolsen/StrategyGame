@@ -10,7 +10,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use bevy::{log::LogPlugin, prelude::*};
+use bevy::{asset::AssetPlugin, log::LogPlugin, prelude::*};
 use clap::{Parser, ValueEnum};
 use game::rendering::{RenderStartupConfig, RenderingPlugin, TerrainRenderer};
 use serde::Deserialize;
@@ -39,11 +39,23 @@ fn main() -> Result<()> {
 
     App::new()
         .insert_resource(config)
-        .add_plugins(DefaultPlugins.build().disable::<LogPlugin>())
+        .add_plugins(
+            DefaultPlugins
+                .set(AssetPlugin {
+                    file_path: workspace_asset_path(),
+                    ..Default::default()
+                })
+                .build()
+                .disable::<LogPlugin>(),
+        )
         .add_plugins(RenderingPlugin)
         .run();
 
     Ok(())
+}
+
+fn workspace_asset_path() -> String {
+    format!("{}/../../assets", env!("CARGO_MANIFEST_DIR"))
 }
 
 #[derive(Debug, Parser)]

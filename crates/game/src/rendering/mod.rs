@@ -2,6 +2,7 @@
 
 mod camera;
 mod chunk_spawner;
+mod feature_models;
 mod hex_mesh;
 mod lighting;
 mod terrain_lookup;
@@ -9,7 +10,10 @@ mod terrain_material;
 
 use bevy::{
     diagnostic::FrameTimeDiagnosticsPlugin,
-    prelude::{App, AppExtStates, IntoScheduleConfigs, OnEnter, Plugin, Resource, Update},
+    pbr::MaterialPlugin,
+    prelude::{
+        App, AppExtStates, IntoScheduleConfigs, OnEnter, Plugin, Resource, Update, in_state,
+    },
     sprite_render::Material2dPlugin,
 };
 use worldgen::WorldParams;
@@ -63,12 +67,20 @@ impl Plugin for RenderingPlugin {
             .add_plugins(Material2dPlugin::<
                 terrain_material::TerrainTextureArrayMaterial,
             >::default())
+            .add_plugins(MaterialPlugin::<
+                terrain_material::TerrainTextureArray3dMaterial,
+            >::default())
             .init_state::<RenderAppState>()
             .init_resource::<RenderStartupConfig>()
             .init_resource::<camera::FpsOverlayTimer>()
             .add_systems(
                 OnEnter(RenderAppState::LoadingAssets),
                 chunk_spawner::prepare_render_assets,
+            )
+            .add_systems(
+                Update,
+                chunk_spawner::finish_render_asset_loading
+                    .run_if(in_state(RenderAppState::LoadingAssets)),
             )
             .add_systems(
                 OnEnter(RenderAppState::SpawningChunks),
@@ -86,8 +98,12 @@ impl Plugin for RenderingPlugin {
                     camera::pan_camera,
                     camera::zoom_camera,
                     camera::update_orbit_camera,
-                    camera::update_fps_overlay,
-                ),
+                )
+                    .run_if(in_state(RenderAppState::Running)),
+            )
+            .add_systems(
+                Update,
+                (camera::update_fps_overlay,).run_if(in_state(RenderAppState::Running)),
             );
     }
 }

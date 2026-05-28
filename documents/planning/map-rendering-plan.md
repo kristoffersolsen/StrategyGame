@@ -1,6 +1,6 @@
 # Map Rendering Plan
 
-**Status:** P1 complete, P2 complete, P3 in planning  
+**Status:** P1 complete, P2 complete, P3.1-P3.4 implemented  
 **Depends on:** Stage 3.5 (resource placement) complete  
 **Precedes:** Stage 4 game scaffolding (cities, units, dynamic systems)  
 **ADRs written:** ADR-0018 (chunk rendering approach), ADR-0019 (texture pipeline)  

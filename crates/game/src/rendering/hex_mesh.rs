@@ -129,10 +129,10 @@ pub(crate) fn build_terrain_3d_chunk_mesh(
                 .normalize(Coord::new(q, r))
                 .expect("chunk iteration keeps r in bounds");
             let surface = terrain_surface(world, coord, mountain_level);
-            let color = terrain_lookup::tile_color(world, coord, mountain_level);
+            let texture_index = terrain_lookup::p3_texture_index(world, coord, mountain_level);
             let is_mountain = is_mountain(world, coord, mountain_level);
 
-            mesh_data.push_top(coord, bounds, surface, color, is_mountain);
+            mesh_data.push_top(coord, bounds, surface, texture_index, is_mountain);
             for direction in Direction::ALL {
                 let neighbor_surface = bounds
                     .neighbor(coord, direction)
@@ -146,7 +146,7 @@ pub(crate) fn build_terrain_3d_chunk_mesh(
                         direction,
                         neighbor_surface,
                         surface,
-                        side_color(color),
+                        texture_index,
                     );
                 }
             }
@@ -185,6 +185,19 @@ pub(crate) fn map_world_size(bounds: MapBounds) -> (f32, f32) {
     let width = f32::sqrt(3.0) * HEX_SIZE * (u32_to_f32(bounds.width()) + 1.0);
     let height = HEX_SIZE * (1.5 * (u32_to_f32(bounds.height()) - 1.0) + 2.0);
     (width, height)
+}
+
+/// Returns the center point where a feature model should stand on a tile.
+pub(crate) fn tile_center_position(world: &WorldData, bounds: MapBounds, coord: Coord) -> [f32; 3] {
+    let mountain_level = mountain_level(world);
+    let center = hex_center(coord, bounds);
+    let surface = terrain_surface(world, coord, mountain_level);
+    let z = if is_mountain(world, coord, mountain_level) {
+        surface + MOUNTAIN_PEAK_OFFSET
+    } else {
+        surface
+    };
+    [center[0], center[1], z]
 }
 
 fn push_hex(
@@ -285,7 +298,8 @@ impl TexturedMeshData {
 struct Terrain3dMeshData {
     positions: Vec<[f32; 3]>,
     normals: Vec<[f32; 3]>,
-    colors: Vec<[f32; 4]>,
+    uvs: Vec<[f32; 2]>,
+    texture_indices: Vec<u32>,
     indices: Vec<u32>,
 }
 
@@ -294,7 +308,8 @@ impl Terrain3dMeshData {
         Self {
             positions: Vec::with_capacity(tile_count * 19),
             normals: Vec::with_capacity(tile_count * 19),
-            colors: Vec::with_capacity(tile_count * 19),
+            uvs: Vec::with_capacity(tile_count * 19),
+            texture_indices: Vec::with_capacity(tile_count * 19),
             indices: Vec::with_capacity(tile_count * 54),
         }
     }
@@ -304,7 +319,7 @@ impl Terrain3dMeshData {
         coord: Coord,
         bounds: MapBounds,
         surface: f32,
-        color: [f32; 4],
+        texture_index: u32,
         is_mountain: bool,
     ) {
         let center = hex_center(coord, bounds);
@@ -318,7 +333,8 @@ impl Terrain3dMeshData {
 
         self.positions.push([center[0], center[1], center_z]);
         self.normals.push([0.0, 0.0, 1.0]);
-        self.colors.push(color);
+        self.uvs.push([0.5, 0.5]);
+        self.texture_indices.push(texture_index);
 
         for angle in CORNER_ANGLES {
             self.positions.push([
@@ -327,7 +343,9 @@ impl Terrain3dMeshData {
                 surface,
             ]);
             self.normals.push([0.0, 0.0, 1.0]);
-            self.colors.push(color);
+            self.uvs
+                .push([0.5 + 0.5 * angle.cos(), 0.5 - 0.5 * angle.sin()]);
+            self.texture_indices.push(texture_index);
         }
 
         for corner in 0..6 {
@@ -344,7 +362,7 @@ impl Terrain3dMeshData {
         direction: Direction,
         lower: f32,
         upper: f32,
-        color: [f32; 4],
+        texture_index: u32,
     ) {
         let [left, right] = edge_corners(direction);
         let center = hex_center(coord, bounds);
@@ -367,9 +385,11 @@ impl Terrain3dMeshData {
         self.positions.push([right_xy[0], right_xy[1], lower]);
         self.positions.push([left_xy[0], left_xy[1], lower]);
         self.normals.extend_from_slice(&[normal; 4]);
-        self.colors.extend_from_slice(&[color; 4]);
+        self.uvs
+            .extend_from_slice(&[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
+        self.texture_indices.extend_from_slice(&[texture_index; 4]);
         self.indices
-            .extend_from_slice(&[start, start + 1, start + 2, start, start + 2, start + 3]);
+            .extend_from_slice(&[start, start + 2, start + 1, start, start + 3, start + 2]);
     }
 
     fn into_mesh(self) -> Mesh {
@@ -379,7 +399,8 @@ impl Terrain3dMeshData {
         );
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, self.positions);
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, self.normals);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, self.colors);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, self.uvs);
+        mesh.insert_attribute(ATTRIBUTE_TEXTURE_INDEX, self.texture_indices);
         mesh.insert_indices(Indices::U32(self.indices));
         mesh
     }
@@ -478,8 +499,4 @@ fn side_normal(center: [f32; 2], left: [f32; 2], right: [f32; 2]) -> [f32; 3] {
     } else {
         [x / length, y / length, 0.0]
     }
-}
-
-fn side_color(color: [f32; 4]) -> [f32; 4] {
-    [color[0] * 0.55, color[1] * 0.55, color[2] * 0.55, color[3]]
 }
