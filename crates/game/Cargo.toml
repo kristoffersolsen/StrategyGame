@@ -9,7 +9,25 @@ workspace = true
 [dependencies]
 coords   = { workspace = true }
 worldgen = { workspace = true }
-bevy     = { workspace = true }
+bevy     = { workspace = true, features = [
+    "bevy_gltf",
+    "bevy_pbr",
+    "bevy_sprite_render",
+    "bevy_ui_render",
+    "bevy_winit",
+    "debug",
+    "default_app",
+    "default_font",
+    "keyboard",
+    "mouse",
+    "multi_threaded",
+    "png",
+    "std",
+    "tonemapping_luts",
+    "wayland",
+    "x11",
+    "zstd_rust",
+] }
 anyhow   = { workspace = true }
 tracing  = { workspace = true }
 tracing-subscriber = { workspace = true }
