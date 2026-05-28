@@ -144,6 +144,8 @@ impl From<MapSizeArg> for MapSize {
 enum RendererArg {
     VertexColor,
     TextureArray,
+    #[value(name = "terrain-3d", alias = "terrain3d")]
+    Terrain3d,
 }
 
 impl From<RendererArg> for TerrainRenderer {
@@ -151,6 +153,7 @@ impl From<RendererArg> for TerrainRenderer {
         match value {
             RendererArg::VertexColor => Self::VertexColor,
             RendererArg::TextureArray => Self::TextureArray,
+            RendererArg::Terrain3d => Self::Terrain3d,
         }
     }
 }
@@ -187,6 +190,23 @@ mod tests {
 
         assert_eq!(config.world_params.seed, 1);
         assert_eq!(config.terrain_renderer, TerrainRenderer::TextureArray);
+        assert_eq!(
+            config.world_params.basic.map_size.dimensions(),
+            MapSize::Medium.dimensions()
+        );
+    }
+
+    #[test]
+    fn p3_3d_preset_loads() {
+        let preset = RenderPreset::load(Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/presets/p3_3d.ron"
+        )))
+        .expect("P3 3D render preset should parse");
+        let config = preset.into_startup_config(None, None, None);
+
+        assert_eq!(config.world_params.seed, 1);
+        assert_eq!(config.terrain_renderer, TerrainRenderer::Terrain3d);
         assert_eq!(
             config.world_params.basic.map_size.dimensions(),
             MapSize::Medium.dimensions()

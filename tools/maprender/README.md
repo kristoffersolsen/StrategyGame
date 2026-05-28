@@ -25,6 +25,10 @@ cargo run --release -p maprender -- \
 cargo run --release -p maprender -- \
     --preset tools/maprender/presets/p2_texture_array.ron
 
+# Run the P3 3D scene renderer preset:
+cargo run --release -p maprender -- \
+    --preset tools/maprender/presets/p3_3d.ron
+
 # Same preset, different seed:
 cargo run --release -p maprender -- \
     --preset tools/maprender/presets/default.ron --seed 42
@@ -54,7 +58,7 @@ Options:
   --size <SIZE>          Override the preset map size:
                          small | standard | medium | large | huge
   --renderer <RENDERER>  Override the preset renderer:
-                         vertex-color | texture-array
+                         vertex-color | texture-array | terrain-3d
 ```
 
 The CLI overrides only the named field. All other values still come from
@@ -64,6 +68,8 @@ the preset file.
 
 ## Controls
 
+P1/P2 renderers use the orthographic 2D camera:
+
 | Input | Action |
 |---|---|
 | `W` / `ArrowUp` | Pan north |
@@ -71,6 +77,15 @@ the preset file.
 | `S` / `ArrowDown` | Pan south |
 | `D` / `ArrowRight` | Pan east |
 | Mouse wheel | Zoom in/out |
+
+P3 `Terrain3d` uses the orbit camera:
+
+| Input | Action |
+|---|---|
+| Middle-mouse drag | Pan pivot |
+| Right-mouse drag | Orbit yaw/pitch |
+| Mouse wheel | Zoom distance |
+| `WASD` / arrow keys | Pan relative to camera yaw |
 
 The camera is clamped to the rectangular rendered map footprint. Seamless
 east-west cylindrical panning is future gameplay-camera work.
@@ -108,7 +123,8 @@ Fields:
 
 `tools/maprender/presets/default.ron` documents the P1 vertex-colour
 baseline. `tools/maprender/presets/p2_texture_array.ron` is the P2
-texture-array gate preset. Copy either file to create named render-test
+texture-array gate preset. `tools/maprender/presets/p3_3d.ron` is the
+P3 3D scene gate preset. Copy any file to create named render-test
 presets.
 
 ```bash
@@ -123,6 +139,7 @@ cp tools/maprender/presets/default.ron tools/maprender/presets/large_vertex_colo
 |---|---|---|
 | `VertexColor` | `vertex-color` | Implemented. P1 baseline: flat terrain colours encoded as mesh vertex colours. |
 | `TextureArray` | `texture-array` | Implemented. P2 baseline: terrain layer indices encoded as mesh attributes and sampled from a 64x64 placeholder texture array. |
+| `Terrain3d` | `terrain-3d` | Implemented through P3.2. Terrain chunks render as 3D elevation meshes with side faces, mountain peaks, water plane, perspective camera, and lighting. |
 
 Renderer selection lives in `game::rendering::RenderStartupConfig`.
 This keeps render tests and the final game compatible: the final game can
@@ -135,14 +152,16 @@ preset.
 
 For P1, record results in `documents/adr/0018-map-rendering-chunk-rendering-approach.md`.
 For P2, record results in `documents/adr/0019-map-rendering-texture-pipeline.md`.
+For P3, record results in `documents/adr/0020-map-rendering-3d-scene-pivot.md`.
 
 Minimum useful run:
 
 1. Run `cargo run --release -p maprender -- --preset tools/maprender/presets/default.ron`.
 2. For P2, run `cargo run --release -p maprender -- --preset tools/maprender/presets/p2_texture_array.ron`.
-3. Pan continuously across the full map width at least twice.
-4. Record minimum FPS, average FPS, maximum frame-time spike, and peak memory.
-5. Note any Bevy validation warnings or startup errors.
+3. For P3, run `cargo run --release -p maprender -- --preset tools/maprender/presets/p3_3d.ron`.
+4. Pan continuously across the full map width at least twice.
+5. Record minimum FPS, average FPS, maximum frame-time spike, and peak memory.
+6. Note any Bevy validation warnings or startup errors.
 
 The pass criteria are documented in `documents/planning/map-rendering-plan.md`.
 

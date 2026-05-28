@@ -3,6 +3,7 @@
 mod camera;
 mod chunk_spawner;
 mod hex_mesh;
+mod lighting;
 mod terrain_lookup;
 mod terrain_material;
 
@@ -26,6 +27,8 @@ pub enum TerrainRenderer {
     VertexColor,
     /// P2 renderer: terrain identity is encoded as texture-array layer indices.
     TextureArray,
+    /// P3 renderer: terrain chunks render through Bevy's 3D PBR mesh path.
+    Terrain3d,
 }
 
 /// Startup inputs for static map rendering.
@@ -72,6 +75,7 @@ impl Plugin for RenderingPlugin {
                 (
                     chunk_spawner::spawn_chunks,
                     camera::spawn_map_camera,
+                    lighting::spawn_lighting,
                     camera::spawn_fps_overlay,
                 )
                     .chain(),
@@ -81,6 +85,7 @@ impl Plugin for RenderingPlugin {
                 (
                     camera::pan_camera,
                     camera::zoom_camera,
+                    camera::update_orbit_camera,
                     camera::update_fps_overlay,
                 ),
             );

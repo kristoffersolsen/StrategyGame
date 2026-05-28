@@ -10,6 +10,7 @@ workspace = true
 coords   = { workspace = true }
 worldgen = { workspace = true }
 bevy     = { workspace = true, features = [
+    "bevy_pbr",
     "bevy_sprite_render",
     "bevy_ui_render",
     "bevy_winit",
@@ -19,8 +20,10 @@ bevy     = { workspace = true, features = [
     "mouse",
     "multi_threaded",
     "std",
+    "tonemapping_luts",
     "wayland",
     "x11",
+    "zstd_rust",
 ] }
 anyhow   = { workspace = true }
 tracing  = { workspace = true }

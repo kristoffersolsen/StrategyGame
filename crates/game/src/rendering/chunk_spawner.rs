@@ -3,10 +3,12 @@
 
 use bevy::{
     asset::RenderAssetUsages,
+    ecs::system::SystemParam,
     image::Image,
     prelude::{
-        Assets, Color, ColorMaterial, Commands, Component, Handle, Mesh, Mesh2d, MeshMaterial2d,
-        NextState, Res, ResMut, Resource, Transform, info,
+        Assets, Color, ColorMaterial, Commands, Component, Handle, Mesh, Mesh2d, Mesh3d,
+        MeshMaterial2d, MeshMaterial3d, NextState, Res, ResMut, Resource, StandardMaterial,
+        Transform, info,
     },
     render::render_resource::{Extent3d, TextureDimension, TextureFormat},
 };
@@ -18,7 +20,8 @@ use crate::{
     rendering::{
         RenderStartupConfig, TerrainRenderer,
         hex_mesh::{
-            CHUNK_SIZE, build_texture_chunk_mesh, build_vertex_color_chunk_mesh, map_world_size,
+            CHUNK_SIZE, build_terrain_3d_chunk_mesh, build_texture_chunk_mesh,
+            build_vertex_color_chunk_mesh, build_water_plane_mesh, map_world_size,
         },
         terrain_lookup::{TEXTURE_LAYER_COUNT, TEXTURE_SIZE, placeholder_texture_array_data},
         terrain_material::{TerrainTextureArrayMaterial, configure_placeholder_texture},
@@ -46,6 +49,13 @@ struct TerrainChunk;
 #[derive(Resource)]
 pub(crate) struct TerrainTextureArray {
     handle: Handle<Image>,
+}
+
+#[derive(SystemParam)]
+pub(crate) struct TerrainMaterialAssets<'w> {
+    color: ResMut<'w, Assets<ColorMaterial>>,
+    standard: ResMut<'w, Assets<StandardMaterial>>,
+    texture_array: ResMut<'w, Assets<TerrainTextureArrayMaterial>>,
 }
 
 pub(crate) fn prepare_render_assets(
@@ -80,8 +90,7 @@ pub(crate) fn spawn_chunks(
     config: Res<RenderStartupConfig>,
     texture_array: Option<Res<TerrainTextureArray>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-    mut texture_materials: ResMut<Assets<TerrainTextureArrayMaterial>>,
+    mut material_assets: TerrainMaterialAssets,
     mut next_state: ResMut<NextState<RenderAppState>>,
 ) {
     let world = generate_world(&config.world_params)
@@ -91,7 +100,7 @@ pub(crate) fn spawn_chunks(
 
     match config.terrain_renderer {
         TerrainRenderer::VertexColor => {
-            let material = materials.add(ColorMaterial::from(Color::WHITE));
+            let material = material_assets.color.add(ColorMaterial::from(Color::WHITE));
             for origin in chunk_origins(bounds) {
                 let mesh = build_vertex_color_chunk_mesh(origin, bounds, &world);
                 commands.spawn((
@@ -108,8 +117,9 @@ pub(crate) fn spawn_chunks(
                 .expect("texture-array renderer assets must be prepared before chunk spawning")
                 .handle
                 .clone();
-            let material =
-                texture_materials.add(TerrainTextureArrayMaterial::from_texture(texture));
+            let material = material_assets
+                .texture_array
+                .add(TerrainTextureArrayMaterial::from_texture(texture));
 
             for origin in chunk_origins(bounds) {
                 let mesh = build_texture_chunk_mesh(origin, bounds, &world);
@@ -120,6 +130,37 @@ pub(crate) fn spawn_chunks(
                     Transform::default(),
                 ));
             }
+        }
+        TerrainRenderer::Terrain3d => {
+            let material = material_assets.standard.add(StandardMaterial {
+                base_color: Color::WHITE,
+                cull_mode: None,
+                perceptual_roughness: 0.9,
+                ..Default::default()
+            });
+            let water_material = material_assets.standard.add(StandardMaterial {
+                base_color: Color::srgba(0.16, 0.42, 0.70, 0.55),
+                cull_mode: None,
+                alpha_mode: bevy::prelude::AlphaMode::Blend,
+                perceptual_roughness: 0.35,
+                ..Default::default()
+            });
+
+            for origin in chunk_origins(bounds) {
+                let mesh = build_terrain_3d_chunk_mesh(origin, bounds, &world);
+                commands.spawn((
+                    TerrainChunk,
+                    Mesh3d(meshes.add(mesh)),
+                    MeshMaterial3d(material.clone()),
+                    Transform::default(),
+                ));
+            }
+
+            commands.spawn((
+                Mesh3d(meshes.add(build_water_plane_mesh(bounds))),
+                MeshMaterial3d(water_material),
+                Transform::default(),
+            ));
         }
     }
 

@@ -1,24 +1,39 @@
-//! Orthographic map camera and FPS overlay.
+//! Map camera and FPS overlay.
 #![allow(clippy::needless_pass_by_value)]
 
 use std::time::Duration;
 
 use bevy::{
     diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin},
-    input::mouse::AccumulatedMouseScroll,
+    ecs::system::SystemParam,
+    input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseButton},
     prelude::{
-        BackgroundColor, ButtonInput, Camera2d, Color, Commands, Component, KeyCode, Node,
-        PositionType, Projection, Query, Res, ResMut, Resource, Text, TextColor, TextFont, Time,
-        Timer, TimerMode, Transform, Val, With, default, px,
+        BackgroundColor, ButtonInput, Camera2d, Camera3d, Color, Commands, Component, KeyCode,
+        Node, PositionType, Projection, Query, Res, ResMut, Resource, Text, TextColor, TextFont,
+        Time, Timer, TimerMode, Transform, Val, Vec2, Vec3, With, default, px,
     },
 };
 
-use crate::rendering::chunk_spawner::{GeneratedWorld, MapRenderBounds};
+use crate::rendering::{
+    RenderStartupConfig, TerrainRenderer,
+    chunk_spawner::{GeneratedWorld, MapRenderBounds},
+};
 
 const PAN_SPEED: f32 = 500.0;
 const ZOOM_MIN: f32 = 0.5;
 const ZOOM_MAX: f32 = 8.0;
 const ZOOM_STEP: f32 = 0.12;
+const ORBIT_INITIAL_DISTANCE: f32 = 900.0;
+const ORBIT_INITIAL_YAW: f32 = -std::f32::consts::FRAC_PI_2;
+const ORBIT_INITIAL_PITCH: f32 = std::f32::consts::PI / 3.5;
+const ORBIT_MIN_PITCH: f32 = 0.20;
+const ORBIT_MAX_PITCH: f32 = 1.48;
+const ORBIT_MIN_DISTANCE: f32 = 80.0;
+const ORBIT_MAX_DISTANCE: f32 = 1_200.0;
+const ORBIT_MOUSE_SENSITIVITY: f32 = 0.005;
+const ORBIT_SCROLL_STEP: f32 = 0.12;
+const ORBIT_KEYBOARD_PAN_FACTOR: f32 = 1.0;
+const ORBIT_MOUSE_PAN_FACTOR: f32 = 0.0015;
 
 #[derive(Component)]
 pub(crate) struct MapCamera;
@@ -29,6 +44,23 @@ pub(crate) struct FpsText;
 #[derive(Resource)]
 pub(crate) struct FpsOverlayTimer(Timer);
 
+#[derive(Resource, Debug, Clone, Copy)]
+pub(crate) struct CameraOrbit {
+    pivot: Vec3,
+    distance: f32,
+    yaw: f32,
+    pitch: f32,
+}
+
+#[derive(SystemParam)]
+pub(crate) struct OrbitInput<'w> {
+    keyboard: Res<'w, ButtonInput<KeyCode>>,
+    mouse_buttons: Res<'w, ButtonInput<MouseButton>>,
+    mouse_motion: Res<'w, AccumulatedMouseMotion>,
+    scroll: Res<'w, AccumulatedMouseScroll>,
+    time: Res<'w, Time>,
+}
+
 impl Default for FpsOverlayTimer {
     fn default() -> Self {
         Self(Timer::new(Duration::from_millis(500), TimerMode::Repeating))
@@ -37,15 +69,33 @@ impl Default for FpsOverlayTimer {
 
 pub(crate) fn spawn_map_camera(
     mut commands: Commands,
+    config: Res<RenderStartupConfig>,
     map_bounds: Res<MapRenderBounds>,
     world: Res<GeneratedWorld>,
 ) {
     let _tile_count = world.data.bounds.width() * world.data.bounds.height();
-    commands.spawn((
-        MapCamera,
-        Camera2d,
-        Transform::from_xyz(map_bounds.width * 0.5, -map_bounds.height * 0.5, 1000.0),
-    ));
+    let pivot = Vec3::new(map_bounds.width * 0.5, -map_bounds.height * 0.5, 0.0);
+
+    match config.terrain_renderer {
+        TerrainRenderer::VertexColor | TerrainRenderer::TextureArray => {
+            commands.spawn((
+                MapCamera,
+                Camera2d,
+                Transform::from_xyz(pivot.x, pivot.y, 1000.0),
+            ));
+        }
+        TerrainRenderer::Terrain3d => {
+            let orbit = CameraOrbit {
+                pivot,
+                distance: ORBIT_INITIAL_DISTANCE,
+                yaw: ORBIT_INITIAL_YAW,
+                pitch: ORBIT_INITIAL_PITCH,
+            };
+            let transform = orbit_transform(orbit);
+            commands.insert_resource(orbit);
+            commands.spawn((MapCamera, Camera3d::default(), transform));
+        }
+    }
 }
 
 pub(crate) fn pan_camera(
@@ -55,6 +105,9 @@ pub(crate) fn pan_camera(
     mut camera: Query<(&mut Transform, &Projection), With<MapCamera>>,
 ) {
     let Ok((mut transform, projection)) = camera.single_mut() else {
+        return;
+    };
+    let Projection::Orthographic(orthographic) = projection else {
         return;
     };
 
@@ -73,8 +126,7 @@ pub(crate) fn pan_camera(
     }
 
     if direction != bevy::prelude::Vec2::ZERO {
-        let zoom = orthographic_scale(projection);
-        let delta = direction.normalize() * PAN_SPEED * zoom * time.delta_secs();
+        let delta = direction.normalize() * PAN_SPEED * orthographic.scale * time.delta_secs();
         transform.translation.x += delta.x;
         transform.translation.y += delta.y;
         clamp_camera(&mut transform, *map_bounds);
@@ -99,6 +151,65 @@ pub(crate) fn zoom_camera(
         orthographic.scale = (orthographic.scale * zoom).clamp(ZOOM_MIN, ZOOM_MAX);
         clamp_camera(&mut transform, *map_bounds);
     }
+}
+
+pub(crate) fn update_orbit_camera(
+    input: OrbitInput,
+    map_bounds: Res<MapRenderBounds>,
+    orbit: Option<ResMut<CameraOrbit>>,
+    mut camera: Query<&mut Transform, With<MapCamera>>,
+) {
+    let Some(mut orbit) = orbit else {
+        return;
+    };
+    let Ok(mut transform) = camera.single_mut() else {
+        return;
+    };
+
+    if input.mouse_buttons.pressed(MouseButton::Right) {
+        orbit.yaw -= input.mouse_motion.delta.x * ORBIT_MOUSE_SENSITIVITY;
+        orbit.pitch = (orbit.pitch + input.mouse_motion.delta.y * ORBIT_MOUSE_SENSITIVITY)
+            .clamp(ORBIT_MIN_PITCH, ORBIT_MAX_PITCH);
+    }
+
+    if input.scroll.delta.y != 0.0 {
+        let zoom = 1.0 - input.scroll.delta.y * ORBIT_SCROLL_STEP;
+        orbit.distance = (orbit.distance * zoom).clamp(ORBIT_MIN_DISTANCE, ORBIT_MAX_DISTANCE);
+    }
+
+    let (forward, right) = orbit_ground_axes(orbit.yaw);
+    let mut keyboard_pan = Vec2::ZERO;
+    if input.keyboard.pressed(KeyCode::KeyA) || input.keyboard.pressed(KeyCode::ArrowLeft) {
+        keyboard_pan -= right;
+    }
+    if input.keyboard.pressed(KeyCode::KeyD) || input.keyboard.pressed(KeyCode::ArrowRight) {
+        keyboard_pan += right;
+    }
+    if input.keyboard.pressed(KeyCode::KeyW) || input.keyboard.pressed(KeyCode::ArrowUp) {
+        keyboard_pan += forward;
+    }
+    if input.keyboard.pressed(KeyCode::KeyS) || input.keyboard.pressed(KeyCode::ArrowDown) {
+        keyboard_pan -= forward;
+    }
+    if keyboard_pan != Vec2::ZERO {
+        let delta = keyboard_pan.normalize()
+            * orbit.distance
+            * ORBIT_KEYBOARD_PAN_FACTOR
+            * input.time.delta_secs();
+        orbit.pivot.x += delta.x;
+        orbit.pivot.y += delta.y;
+    }
+
+    if input.mouse_buttons.pressed(MouseButton::Middle) && input.mouse_motion.delta != Vec2::ZERO {
+        let delta = (-right * input.mouse_motion.delta.x + forward * input.mouse_motion.delta.y)
+            * orbit.distance
+            * ORBIT_MOUSE_PAN_FACTOR;
+        orbit.pivot.x += delta.x;
+        orbit.pivot.y += delta.y;
+    }
+
+    clamp_orbit_pivot(&mut orbit, *map_bounds);
+    *transform = orbit_transform(*orbit);
 }
 
 pub(crate) fn spawn_fps_overlay(mut commands: Commands) {
@@ -149,14 +260,28 @@ pub(crate) fn update_fps_overlay(
     );
 }
 
-fn orthographic_scale(projection: &Projection) -> f32 {
-    match projection {
-        Projection::Orthographic(orthographic) => orthographic.scale,
-        Projection::Perspective(_) | Projection::Custom(_) => 1.0,
-    }
-}
-
 fn clamp_camera(transform: &mut Transform, map_bounds: MapRenderBounds) {
     transform.translation.x = transform.translation.x.clamp(0.0, map_bounds.width);
     transform.translation.y = transform.translation.y.clamp(-map_bounds.height, 0.0);
+}
+
+fn clamp_orbit_pivot(orbit: &mut CameraOrbit, map_bounds: MapRenderBounds) {
+    orbit.pivot.x = orbit.pivot.x.clamp(0.0, map_bounds.width);
+    orbit.pivot.y = orbit.pivot.y.clamp(-map_bounds.height, 0.0);
+    orbit.pivot.z = 0.0;
+}
+
+fn orbit_transform(orbit: CameraOrbit) -> Transform {
+    let offset = Vec3::new(
+        orbit.distance * orbit.pitch.cos() * orbit.yaw.cos(),
+        orbit.distance * orbit.pitch.cos() * orbit.yaw.sin(),
+        orbit.distance * orbit.pitch.sin(),
+    );
+    Transform::from_translation(orbit.pivot + offset).looking_at(orbit.pivot, Vec3::Z)
+}
+
+fn orbit_ground_axes(yaw: f32) -> (Vec2, Vec2) {
+    let forward = Vec2::new(-yaw.cos(), -yaw.sin()).normalize();
+    let right = Vec2::new(forward.y, -forward.x);
+    (forward, right)
 }
