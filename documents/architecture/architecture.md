@@ -7,7 +7,7 @@ It is updated at each stage gate as new structure is added.
 For *why* the architecture is this way, see `docs/design/overview.md`.
 For *when* decisions were made, see `documents/adr/`.
 
-**Current stage:** Stage P1 map rendering implemented; interactive
+**Current stage:** Stage P2 map rendering implemented; interactive P2
 performance gate measurements pending.
 
 ---
@@ -71,16 +71,20 @@ The Bevy application. Owns the ECS world, plugin registration, systems,
 and all runtime logic. Reads `WorldData` from `worldgen` to spawn
 entities at game start.
 
-Stage P1 adds the static map rendering foundation:
+Stage P1/P2 adds the static map rendering foundation:
 
 - `RenderingPlugin` registered from `main.rs`.
 - Chunked 16x16 pointy-top hex terrain meshes built from `WorldData`.
-- P1 vertex-colour terrain lookup for ocean, coast, mountains, hills,
-  biomes, and river tinting.
+- Vertex-colour terrain lookup for the P1 baseline.
+- Texture-array terrain renderer for the P2 baseline, using a custom
+  Bevy 2D material, WGSL shader, per-vertex texture indices, and 64x64
+  generated placeholder texture layers.
+- `RenderAppState`, a minimal loading/spawning/running sequence that
+  prepares renderer assets before terrain chunks spawn.
 - `RenderStartupConfig`, which selects world-generation parameters and
   terrain renderer implementation at startup.
-- `TerrainRenderer`, currently supporting `VertexColor` and reserving
-  `TextureArray` for P2.
+- `TerrainRenderer`, currently supporting `VertexColor` and
+  `TextureArray`.
 - A `Camera2d` map camera with WASD/arrow-key pan and scroll-wheel zoom.
 - A Bevy diagnostics text overlay showing FPS and frame time.
 
@@ -117,9 +121,10 @@ It uses the reusable `game::rendering` plugin and loads a RON preset
 from `tools/maprender/presets/`. Presets select seed, map size, terrain
 renderer implementation, and `worldgen::TuningParams`.
 
-P1 uses `renderer: VertexColor`. P2 will add the texture-array renderer
-behind the same preset field so test runs can switch rendering pipelines
-without changing the game crate startup architecture.
+P1 uses `renderer: VertexColor`. P2 uses `renderer: TextureArray`. Both
+renderers are selected through the same preset field so test runs can
+switch rendering pipelines without changing the game crate startup
+architecture.
 
 ---
 

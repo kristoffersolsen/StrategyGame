@@ -3,13 +3,15 @@
 use std::f32::consts::PI;
 
 use bevy::{
-    asset::RenderAssetUsages, mesh::Indices, prelude::Mesh,
-    render::render_resource::PrimitiveTopology,
+    asset::RenderAssetUsages,
+    mesh::{Indices, MeshVertexAttribute},
+    prelude::Mesh,
+    render::render_resource::{PrimitiveTopology, VertexFormat},
 };
 use coords::{Coord, MapBounds};
 use worldgen::WorldData;
 
-use crate::rendering::terrain_color;
+use crate::rendering::terrain_lookup;
 
 /// Tile count per chunk side. A chunk covers `CHUNK_SIZE x CHUNK_SIZE` tiles.
 ///
@@ -19,6 +21,10 @@ pub(crate) const CHUNK_SIZE: u32 = 16;
 
 /// Circumradius of one pointy-top hex in world units.
 pub(crate) const HEX_SIZE: f32 = 16.0;
+
+/// Per-vertex terrain texture-array layer index for the P2 renderer.
+pub(crate) const ATTRIBUTE_TEXTURE_INDEX: MeshVertexAttribute =
+    MeshVertexAttribute::new("TerrainTextureIndex", 98_754_091_700, VertexFormat::Uint32);
 
 /// Builds a static vertex-colour mesh for one terrain chunk.
 pub(crate) fn build_vertex_color_chunk_mesh(
@@ -45,7 +51,7 @@ pub(crate) fn build_vertex_color_chunk_mesh(
             push_hex(
                 coord,
                 bounds,
-                terrain_color::tile_color(world, coord, mountain_level),
+                terrain_lookup::tile_color(world, coord, mountain_level),
                 &mut positions,
                 &mut normals,
                 &mut colors,
@@ -63,6 +69,36 @@ pub(crate) fn build_vertex_color_chunk_mesh(
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_indices(Indices::U32(indices));
     mesh
+}
+
+/// Builds a static texture-array mesh for one terrain chunk.
+pub(crate) fn build_texture_chunk_mesh(
+    chunk_origin: Coord,
+    bounds: MapBounds,
+    world: &WorldData,
+) -> Mesh {
+    let max_q = (chunk_origin.q + CHUNK_SIZE.cast_signed()).min(bounds.width().cast_signed());
+    let max_r = (chunk_origin.r + CHUNK_SIZE.cast_signed()).min(bounds.height().cast_signed());
+    let tile_count = usize::try_from((max_q - chunk_origin.q) * (max_r - chunk_origin.r))
+        .expect("chunk tile count must be non-negative");
+
+    let mut mesh_data = TexturedMeshData::with_capacity(tile_count);
+    let mountain_level = mountain_level(world);
+
+    for r in chunk_origin.r..max_r {
+        for q in chunk_origin.q..max_q {
+            let coord = bounds
+                .normalize(Coord::new(q, r))
+                .expect("chunk iteration keeps r in bounds");
+            mesh_data.push_hex(
+                coord,
+                bounds,
+                terrain_lookup::texture_index(world, coord, mountain_level),
+            );
+        }
+    }
+
+    mesh_data.into_mesh()
 }
 
 /// Returns the approximate world-space size of the generated map.
@@ -102,6 +138,68 @@ fn push_hex(
         let a = start + 1 + corner;
         let b = start + 1 + ((corner + 1) % 6);
         indices.extend_from_slice(&[start, a, b]);
+    }
+}
+
+struct TexturedMeshData {
+    positions: Vec<[f32; 3]>,
+    normals: Vec<[f32; 3]>,
+    uvs: Vec<[f32; 2]>,
+    texture_indices: Vec<u32>,
+    indices: Vec<u32>,
+}
+
+impl TexturedMeshData {
+    fn with_capacity(tile_count: usize) -> Self {
+        Self {
+            positions: Vec::with_capacity(tile_count * 7),
+            normals: Vec::with_capacity(tile_count * 7),
+            uvs: Vec::with_capacity(tile_count * 7),
+            texture_indices: Vec::with_capacity(tile_count * 7),
+            indices: Vec::with_capacity(tile_count * 18),
+        }
+    }
+
+    fn push_hex(&mut self, coord: Coord, bounds: MapBounds, texture_index: u32) {
+        let center = hex_center(coord, bounds);
+        let start =
+            u32::try_from(self.positions.len()).expect("chunk mesh vertex count fits in u32");
+
+        self.positions.push([center[0], center[1], 0.0]);
+        self.normals.push([0.0, 0.0, 1.0]);
+        self.uvs.push([0.5, 0.5]);
+        self.texture_indices.push(texture_index);
+
+        for angle in CORNER_ANGLES {
+            self.positions.push([
+                center[0] + HEX_SIZE * angle.cos(),
+                center[1] + HEX_SIZE * angle.sin(),
+                0.0,
+            ]);
+            self.normals.push([0.0, 0.0, 1.0]);
+            self.uvs
+                .push([0.5 + 0.5 * angle.cos(), 0.5 - 0.5 * angle.sin()]);
+            self.texture_indices.push(texture_index);
+        }
+
+        for corner in 0..6 {
+            let a = start + 1 + corner;
+            let b = start + 1 + ((corner + 1) % 6);
+            self.indices.extend_from_slice(&[start, a, b]);
+        }
+    }
+
+    fn into_mesh(self) -> Mesh {
+        let mut mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+        );
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, self.positions);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, self.normals);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, self.uvs);
+        mesh.insert_attribute(ATTRIBUTE_TEXTURE_INDEX, self.texture_indices);
+        mesh.insert_indices(Indices::U32(self.indices));
+        mesh
     }
 }
 

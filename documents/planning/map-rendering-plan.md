@@ -1,9 +1,10 @@
 # Map Rendering Plan
 
-**Status:** Planning complete — ready for implementation  
+**Status:** P1 complete, P2 complete, P3 in planning  
 **Depends on:** Stage 3.5 (resource placement) complete  
 **Precedes:** Stage 4 game scaffolding (cities, units, dynamic systems)  
-**ADRs to write:** ADR-0018 (chunk rendering approach), ADR-0019 (texture pipeline)
+**ADRs written:** ADR-0018 (chunk rendering approach), ADR-0019 (texture pipeline)  
+**ADRs to write:** ADR-0020 (3D scene pivot), ADR-0021 (orbit camera)
 
 ---
 
@@ -11,20 +12,21 @@
 
 Produce a mostly-complete map rendering layer before building any
 dynamic game systems. Cities, units, and UI all sit on top of the
-terrain; building them on an unproven, placeholder rendering foundation
-creates rework. This plan establishes that foundation in three stages:
+terrain; building them on an unproven rendering foundation creates
+rework. This plan establishes that foundation in three stages:
 
 - **Stage P1** — Performance gate: chunked vertex-color rendering, 60 FPS
-  validated.
+  validated. **Complete.**
 - **Stage P2** — Texture pipeline: texture array material, placeholder
-  flat-color textures, same performance target.
-- **Stage P3** — Terrain visuals: authored placeholder art for all
-  terrain types and features, visual quality sufficient for development
-  use. Not final art.
+  flat-color textures, same performance target. **Complete.**
+- **Stage P3** — Full 3D scene: perspective camera with interactive
+  orbit controls, hex prism terrain geometry with elevation tiers,
+  directional lighting, Kenney forest models. Development-quality
+  visuals sufficient to build cities and units against.
 
-The output of P3 is a map that looks like a game in development — readable,
-unambiguous, good enough to build cities and units against — without
-committing to final art direction.
+The output of P3 is a 3D strategy map — readable terrain elevation,
+interactive camera, instanced forest models — good enough to build
+Stage 4 against without being misled by the visuals.
 
 ---
 
@@ -34,521 +36,624 @@ The rendering stack has four layers. Layers are independent; each can be
 updated without touching the others.
 
 ```
-Layer 0: Terrain chunks      — static hex meshes baked from WorldData;
+Layer 0: Terrain chunks      — 3D hex prism meshes baked from WorldData;
                                one entity per 16×16 chunk (~150 entities
-                               for default map size)
-Layer 1: Feature overlays    — rivers, forests, roads; separate chunk
-                               meshes or sparse entities depending on
-                               density (planned in P3)
+                               for default map size). Static after load.
+Layer 1: Feature overlays    — rivers (texture overlay on terrain),
+                               forests (instanced 3D models),
+                               resources (instanced icons or small models)
 Layer 2: Dynamic overlays    — selection highlights, movement range,
                                fog of war; per-entity, small N at any
-                               given moment (planned in Stage 4+)
-Layer 3: Units and cities    — standard Bevy entities with sprites or
-                               meshes (Stage 4+)
+                               given moment (Stage 4+)
+Layer 3: Units and cities    — 3D models loaded from .glb files (Stage 4+)
 ```
 
-This plan covers Layers 0 and 1. Layers 2 and 3 are out of scope.
+This plan covers Layers 0 and 1 through P3. Layers 2 and 3 are out of
+scope.
 
-The terrain layer is permanently static after world load. Features like
-rivers and forests are also generated at world load and do not change
-during a game session (channels, deforestation, and similar terrain
-modifications are a late-game design concern that will be handled by
-rebuilding affected chunks, not by redesigning the layer architecture).
+The terrain layer is permanently static after world load. Chunk
+invalidation (for future terrain-modifying features like channel
+digging) is handled by rebuilding the affected chunk's mesh — no
+architectural change required.
 
 ---
 
-## Stage P1: Performance gate
+## Completed stages
 
-**Goal:** Prove that the chunked mesh approach scales to the target map
-size (240×150 ≈ 36K tiles) at 60 FPS before building anything on top
-of it. This is the gate described in `implementation-plan.md §3.5`.
+### Stage P1: Performance gate (complete)
 
-### P1.1 Hex mesh geometry
+Chunked vertex-color rendering. 150 chunk entities for 240×150 map.
+Orthographic 2D camera with WASD pan and scroll zoom. FPS overlay.
+Gate passed. ADR-0018 written.
 
-Implement `build_chunk_mesh` in `crates/game/src/rendering/hex_mesh.rs`.
-This function takes a chunk origin `Coord`, the map `MapBounds`, and a
-reference to `WorldData`, and returns a Bevy `Mesh`.
+Key files: `rendering/hex_mesh.rs`, `rendering/chunk_spawner.rs`,
+`rendering/camera.rs`, `rendering/terrain_color.rs`.
 
-**Hex geometry.** A pointy-top hex with circumradius `r` has six
-vertices. In axial coordinates `(q, r_coord)`, the world-space center of
-a tile is:
+### Stage P2: Texture pipeline (complete)
 
-```
-x = hex_size * (√3 · q  +  √3/2 · r_coord)
-y = hex_size * (3/2 · r_coord)
-```
+Replaced vertex colors with a texture array material. Custom WGSL
+shader samples a `texture_2d_array` by per-vertex layer index.
+Programmatically generated 64×64 placeholder PNGs for all terrain
+types. `AppState` loading sequence: assets load before chunks spawn.
+Gate passed. ADR-0019 written.
 
-This is the 3D equivalent of the formula in
-`crates/worldgen/src/debug_viz.rs::hex_center`, adapted for mesh vertex
-positions rather than image pixel centers. The `debug_viz` code is a
-reference; do not reuse it — it is headless-only and outputs `f64` pixel
-coordinates.
+Key files: `rendering/terrain_material.rs`, `rendering/terrain_lookup.rs`,
+`app_state.rs`, `assets/textures/terrain/`.
 
-Each hex triangulates into a triangle fan from its center: 6 triangles,
-7 unique vertices (center + 6 corners), 18 indices. All vertices of a
-given tile receive the same vertex color (flat shading, no interpolation
-across the face).
+---
 
-**Mesh attributes required for P1:**
+## Stage P3: Full 3D scene
 
-- `POSITION` — `Vec3`, Z = 0 for all vertices (flat map)
-- `COLOR` — `Vec4` RGBA, one color per vertex (same for all 7 vertices
-  of a tile)
-- `NORMAL` — `Vec3`, `[0.0, 0.0, 1.0]` for all vertices (flat map
-  facing the camera)
+**Goal:** Pivot from 2D flat rendering to a full 3D scene with
+perspective camera, elevation geometry, directional lighting, and
+instanced forest models from Kenney's nature pack. This is the final
+rendering foundation that Stage 4 builds on.
 
-The `NORMAL` attribute is required by `StandardMaterial` even with
-`unlit: true`; omitting it causes a Bevy validation warning.
+**Rationale for 3D pivot:** The map's elevation system — ocean, coast,
+flat land, hills, mountains — is the primary visual differentiator
+between terrain types. A flat top-down 2D view cannot convey elevation
+without purely color-based cues, which are ambiguous and unreadable at
+small tile size. A tilted 3D camera with actual height geometry makes
+elevation immediately legible. Committing to 3D now, before cities and
+units exist, avoids a later forced migration. The long-term direction
+(Stellaris-inspired 3D RTS) makes this the correct permanent
+architecture. Recorded in ADR-0020.
 
-**East-west wrap.** Tiles whose axial `q` coordinate places their
-world-space center outside the map's pixel-space width are wrapped using
-`MapBounds::normalize` before computing world position. Chunks that
-straddle the east-west seam are handled correctly because each tile is
-positioned independently — the mesh is contiguous within a chunk
-regardless of seam crossing.
+**Scope:**
+- Perspective camera with interactive orbit controls (pan, zoom, tilt,
+  rotate)
+- Hex prism terrain geometry with discrete elevation tiers and side faces
+- Peaked mountain tile geometry
+- Texture array extended for top and side faces
+- Bevy asset processor configured (PNG → BC7 at build time)
+- Directional light (sun), shadows off, documented toggle to enable
+- Kenney nature pack forest models as instanced 3D objects
+- `ClearColor` sky color
+- Performance measurement against P2 baseline
 
-**Chunk size constant:**
+**Assets available for P3:**
+
+*Terrain top-face textures (256×256 PNG, authored in Krita):*
+`ocean.png`, `coast.png`, `grassland.png`, `tropical.png`,
+`temperate.png`, `boreal.png`, `desert.png`, `tundra.png`,
+`mountain.png` — all nine base terrain types covered.
+
+*Foliage models (Kenney CC0, `.glb`):*
+- Tropical: `tree_tropical_A.glb`, `tree_tropical_B.glb`
+- Temperate: `tree_temperate_A.glb`, `tree_temperate_B.glb`, `tree_temperate_C.glb`
+- Boreal: `tree_boreal_A.glb`, `tree_boreal_B.glb`
+
+*Resource models (Kenney CC0, `.glb`):*
+- Strategic: `iron_A.glb`, `horses_A.glb`
+- Luxury: `gold.glb`, `wine.glb`, `gems.glb`, `spices.glb`
+- Bonus: `wheat.glb`, `stone.glb`, `fish.glb`
+
+Note: within each resource category, models currently share the same
+mesh (all luxury models are identical, all bonus models are identical).
+This is sufficient to prove the placement pipeline and per-resource
+dispatch; distinct per-resource models are a later art pass.
+
+*Still programmatically generated (no authored art yet):*
+- Hilly variants of all land biome textures
+- Side face textures (`side_land`, `side_hill`, `side_mountain`,
+  `side_coast`)
+
+**Out of scope for P3:**
+- Shadows (light present; one constant to enable)
+- River geometry as 3D (remains texture overlay on terrain top face)
+- Road/feature geometry
+- Units, cities, any dynamic entities
+- Per-resource distinct models within a category (all luxury share a
+  mesh; differentiation is a later art pass)
+
+---
+
+### P3.1 Scene pivot: 3D camera and lighting infrastructure
+
+This step replaces the `Camera2d` and unlit material from P1/P2 with a
+full 3D scene. All other rendering code is unchanged at this step —
+the terrain mesh is still flat. This keeps the diff small and isolates
+the camera/lighting change from the geometry change.
+
+**Camera replacement.** Remove `Camera2d` and replace with a
+`Camera3d` entity using a perspective projection. The initial position
+is above the map center looking down at a shallow angle — approximately
+60° tilt from vertical, 800 world units above the terrain. This gives
+a first-person view of the isometric-style perspective that 4X games
+use.
+
+The `Camera2d` → `Camera3d` change also requires updating the mesh
+rendering path. P2 uses `Mesh2d` and `MeshMaterial2d` (Bevy's 2D
+render pipeline). P3 switches to `Mesh3d` and `MeshMaterial3d` with a
+`StandardMaterial` configured for 3D. The chunk spawner changes in one
+place; the mesh geometry is unchanged until P3.2.
+
+**Lighting.** Add a `DirectionalLight` entity representing the sun:
 
 ```rust
-/// Tile count per chunk side. A chunk covers CHUNK_SIZE × CHUNK_SIZE tiles.
-///
-/// 16 is the conventional default for strategy-game tile renderers:
-/// small enough for good frustum-culling granularity, large enough
-/// that draw call count (~150 for the default map) is negligible.
-/// See ADR-0018.
-pub const CHUNK_SIZE: u32 = 16;
-```
+/// Primary directional light. Angle chosen to cast readable shadows
+/// from the north-west — the strategy game convention since Civ 5.
+/// Shadows are disabled for P3; flip SHADOWS_ENABLED to test them.
+const SHADOWS_ENABLED: bool = false;
 
-**Color lookup.** In P1, vertex color is derived from `WorldData` using
-a simple priority order:
-
-1. Ocean (height level 0) → deep blue `#1a3a5c`
-2. Coast (height level 1) → shallow blue `#2e6ea6`
-3. Mountain → dark grey `#5a5a5a`
-4. Hilly → apply a darkening factor (~15%) to the biome color below
-5. Biome:
-   - `TropicalRainforest` → dark green `#2d6a2d`
-   - `TemperateForest` → medium green `#4a7c4a`
-   - `BorealForest` → muted green `#4a6b55`
-   - `Grassland` → yellow-green `#7a9a3a`
-   - `Desert` → sandy tan `#c8a96e`
-   - `Tundra` → pale grey-green `#8a9a8a`
-
-These colors are not art — they are debug-readable placeholders. The
-color table lives in `terrain_color.rs` as a simple `match` expression,
-making it trivial to update in P3.
-
-River tiles receive a thin blue tint applied on top of their terrain
-color in P1. In P3 this becomes a dedicated feature overlay (Layer 1).
-
-### P1.2 Chunk spawning startup system
-
-A Bevy `Startup` system in `chunk_spawner.rs` that runs once at app
-launch:
-
-1. Calls `worldgen::generate_world` with a hardcoded default seed and
-   `WorldParams::default()`. In Stage 4, this will accept a seed from
-   the game state; for the gate, hardcoded is sufficient.
-2. Inserts `WorldData` as a Bevy `Resource`.
-3. Iterates over all chunk origins: `q` from 0 to `ceil(width / CHUNK_SIZE)`,
-   `r` from 0 to `ceil(height / CHUNK_SIZE)`.
-4. For each chunk, calls `build_chunk_mesh`, registers the mesh with
-   `Assets<Mesh>`, and spawns a `MaterialMeshBundle` entity.
-
-The material is `StandardMaterial` with:
-
-```rust
-StandardMaterial {
-    unlit: true,             // no lighting; vertex colors pass through
-    vertex_colors: true,     // use the COLOR attribute
-    cull_mode: None,         // both faces visible (safe default for 2D)
+DirectionalLight {
+    illuminance: 10_000.0,   // lux; approx. overcast daylight
+    shadows_enabled: SHADOWS_ENABLED,
     ..Default::default()
 }
 ```
 
-`unlit: true` is correct for a 2D strategy map. The terrain is not a 3D
-scene; there is no light source. This also removes lighting as a source
-of GPU overhead.
+The light's `Transform` is rotated to simulate sun position from the
+north-west at roughly 45° elevation. Adjust `illuminance` during
+tuning — too bright washes out textures, too dim makes the scene
+murky.
 
-### P1.3 Camera
+Also add an `AmbientLight` resource at low intensity (~0.15 relative
+to the directional light). Without ambient, the shadow side of
+elevation steps goes pure black, which looks wrong even without shadow
+casting enabled.
 
-An orthographic camera in `camera.rs` looking straight down at Z = 0.
-
-**Projection:**
-
-```rust
-Camera2dBundle  // Bevy's built-in orthographic 2D camera
-```
-
-Bevy's `Camera2dBundle` uses an orthographic projection with Y-up,
-which matches the hex coordinate layout (positive `r` is southward in
-axial coords, which maps to negative Y in screen space — handle this
-with a Y-flip in the hex center formula or by configuring the camera
-projection accordingly).
-
-**Pan input.** WASD or arrow keys translate the camera transform. Pan
-speed is proportional to the current zoom level so the map doesn't feel
-sluggish when zoomed out. A `PanSpeed` constant (world units per second
-at zoom 1.0) is exposed as a tunable:
+**Sky color.**
 
 ```rust
-const PAN_SPEED: f32 = 500.0; // world units per second at zoom 1.0
+app.insert_resource(ClearColor(Color::srgb(0.53, 0.70, 0.87)));
 ```
 
-**Zoom input.** Mouse scroll wheel changes the orthographic scale.
-Clamped to a range that keeps the map readable:
+A horizon-blue sky color. This is a single line but makes the scene
+feel grounded. The specific value can be tuned; the important property
+is that it reads as sky against the terrain colors.
 
-```rust
-const ZOOM_MIN: f32 = 0.5;   // zoomed in: tiles are large
-const ZOOM_MAX: f32 = 8.0;   // zoomed out: full map visible at once
-```
-
-**East-west wrap.** In P1, the camera is clamped to the map bounds —
-panning past the east edge stops at the edge. Wrap-aware camera
-(duplicate geometry, seamless cylindrical pan) is Stage 4 work. This
-is a known limitation documented in ADR-0018.
-
-### P1.4 FPS overlay
-
-Add `FrameTimeDiagnosticsPlugin` and a simple `TextBundle` that updates
-every 0.5 seconds showing current FPS and frame time in milliseconds.
-Position in the top-left corner, white text with a dark background for
-readability against any terrain color.
-
-### P1.5 Gate measurement
-
-Pass criteria (all must hold):
-
-- Minimum FPS ≥ 60 during continuous camera pan across the full map
-  width, measured over at least two full traversals.
-- No frame-time spike exceeds 2× the average frame time during pan.
-- Memory footprint < 500 MB (measure via OS task manager or
-  `heaptrack`).
-- No Bevy validation warnings or errors at startup.
-
-Record minimum, average, and maximum FPS and peak memory in ADR-0018.
-
-### P1 file structure
-
-```
-crates/game/src/
-├── main.rs                    ← Bevy App, plugin registration
-└── rendering/
-    ├── mod.rs                 ← RenderingPlugin: registers all systems
-    ├── hex_mesh.rs            ← build_chunk_mesh(), CHUNK_SIZE
-    ├── terrain_color.rs       ← WorldData → vertex color (P1), texture
-    │                            index (P2+)
-    ├── chunk_spawner.rs       ← Startup system: world gen + chunk spawn
-    └── camera.rs              ← orthographic camera, pan/zoom input
-```
-
-### P1 gate: complete when
-
-- App launches and renders 240×150 hex map as chunked meshes.
-- FPS overlay visible and updating.
-- All pass criteria in §P1.5 met and recorded.
-- ADR-0018 written and accepted.
-- `documents/architecture/architecture.md` updated: `game` crate no
-  longer a stub.
+**Gate for P3.1:** App renders the flat P2 terrain mesh in a 3D scene
+with perspective camera. Lighting visibly affects the terrain (flat
+tiles show uniform shading; the directional light angle is apparent).
+FPS unchanged from P2 baseline.
 
 ---
 
-## Stage P2: Texture pipeline
+### P3.2 Hex prism geometry
 
-**Goal:** Replace vertex colors with a texture array material. Validate
-that the textured pipeline meets the same 60 FPS target. Establish the
-asset organization and shader infrastructure that P3's authored art will
-slot into.
+Replace the flat hex mesh (Z = 0 for all vertices) with hex prisms
+that express elevation through actual height. This is the core
+geometry change of P3.
 
-This stage uses placeholder textures — flat solid-color 64×64 PNGs, one
-per terrain type and feature. No art skill required. The goal is a
-working pipeline, not visual quality.
+**Elevation tiers.** Map `HeightLevel` values to world-space Z heights.
+The exact values are tunable constants:
 
-### P2.1 Texture array and atlas decision
+```rust
+/// World-space height (Z) for each elevation tier.
+/// Units are the same as HEX_SIZE (16 world units = one tile radius).
+const ELEVATION_HEIGHTS: [f32; 5] = [
+    -8.0,   // 0: ocean floor — below the waterline
+     0.0,   // 1: coast — at waterline
+     4.0,   // 2: flat land
+    12.0,   // 3: hills
+    24.0,   // 4: mountains (before peak offset)
+];
+```
 
-**Decision: texture array.**
+The mountain height is the base of the prism; the peak geometry adds
+additional height on top (see below). Ocean tiles sit below the
+waterline — a flat water plane at Z = 0 (coast level) can be added
+later as a separate mesh to cover ocean/coast tiles.
 
-A texture array is a GPU resource that holds N textures at the same
-resolution and format, addressable by integer index. The shader samples
-it as `texture2DArray(texture, uv, layer_index)`. This is the correct
-choice here for three reasons:
+**Top face geometry.** The top face of each non-mountain tile is the
+same flat hexagon from P1/P2, but translated to the tile's Z height.
+`CORNER_ANGLES` and the UV layout are unchanged.
 
-- Textures are authored independently — each terrain type is its own
-  PNG file, not packed into a sheet. Adding a new terrain type is
-  adding a file, not repacking an atlas.
-- All terrain textures will be the same resolution (64×64 for
-  placeholder, 128×128 or 256×256 for final art). Texture arrays
-  require uniform dimensions; this constraint is acceptable and
-  enforced at load time.
-- The layer index is a small integer that fits cleanly into a vertex
-  attribute. No UV offset arithmetic.
+**Side face geometry.** Where adjacent tiles differ in elevation, the
+lower tile's prism exposes a vertical face. Side faces are added during
+chunk mesh construction by checking each tile's six neighbours:
 
-A texture atlas (one large spritesheet, UV offsets per tile) is the
-alternative. It is rejected because atlas packing is fiddly, UV offset
-arithmetic is error-prone, and adding a new terrain type requires
-repacking the sheet and updating all UV mappings. The texture array
-approach scales to 50+ terrain/feature types without any of this
-overhead. See ADR-0019.
+For each tile `T` and each of its six neighbours `N`:
+- If `height(N) < height(T)`: add a quad (two triangles) connecting
+  `T`'s bottom edge (at `height(N)`) to `T`'s top edge at the shared
+  boundary. This is `T`'s side face visible from `N`'s perspective.
+- If `height(N) >= height(T)`: no side face needed on this edge (the
+  neighbour is at the same height or taller; the face is hidden).
 
-### P2.2 Custom material
+The side face quad uses a different texture index from the top face —
+a rocky/earthy side texture that reads as the exposed cross-section of
+the terrain. Side faces do not need UVs that tile continuously across
+chunk boundaries; each face is textured independently.
 
-`StandardMaterial` does not support texture arrays — it samples a single
-`Texture2D`. A custom material is required.
+**Neighbour lookup across chunk boundaries.** Side face generation
+requires reading the height of neighbouring tiles, which may be in
+an adjacent chunk. This is not a problem — chunk mesh construction
+has access to the full `WorldData`, so neighbour lookups are a
+`world.tectonics.height_level.get(neighbour_coord)` call regardless
+of which chunk the neighbour belongs to.
 
-Bevy's material system (`Material` trait + `AsBindGroup` derive) makes
-this tractable. The custom material in `terrain_material.rs` binds:
+**Mountain peaked top face.** For mountain tiles (`height_level ==
+mountain_level`), the top face is not flat. The center vertex is raised
+by a `MOUNTAIN_PEAK_OFFSET` above the six corner vertices:
 
-- A `texture_2d_array` binding for the terrain texture array.
-- A `sampler` binding for it.
+```rust
+const MOUNTAIN_PEAK_OFFSET: f32 = 16.0; // world units above prism top
+```
 
-The WGSL vertex shader passes the texture layer index from a vertex
-attribute to the fragment shader. The fragment shader samples the array
-and outputs the texel color. The full shader is approximately 40 lines
-of WGSL — straightforward once the bind group layout is correct.
+The six triangles of the top face each become sloped — a tent shape
+that reads immediately as a mountain from a tilted camera. The six
+corner vertices remain at the prism's top Z; only the center vertex is
+elevated. This is a one-line change in `push_hex_top` for mountain
+tiles.
 
-**Vertex attribute change from P1.** The `COLOR` attribute is replaced
-by a `TEXTURE_INDEX` attribute (a `u32` per vertex, same value for all
-7 vertices of a tile). The `build_chunk_mesh` function in `hex_mesh.rs`
-gains this attribute; the `COLOR` attribute is removed. The change is
-localized to `hex_mesh.rs` and `terrain_color.rs` — everything else is
-unchanged.
+**Hill top face.** Hills use a flat top face at their elevation tier.
+The visual differentiation from flat land comes entirely from the
+height difference and side faces. No additional geometry is needed.
 
-### P2.3 UV coordinates
+**Water plane.** A single large flat mesh at Z = 0 (coast level),
+covering the full map extents, rendered with a semi-transparent blue
+`StandardMaterial`. Ocean and coast tile tops sit at or below this
+plane; land tiles protrude above it. This gives a clear waterline
+without requiring per-tile water geometry. The water plane is one
+entity, not chunked — it is always fully visible and has negligible
+vertex count.
 
-Each hex tile's vertices need UV coordinates for texture sampling. For a
-hexagonal tile mapped to a square texture, the UVs follow the pointy-top
-hex shape:
+**Texture index table (full P3 set).** The P2 programmatic placeholders
+are replaced by authored PNGs for all base terrain types. Side faces
+and hilly variants are still programmatically generated. The complete
+table:
 
-- The center vertex maps to `(0.5, 0.5)`.
-- The six corner vertices map to the six equidistant points around the
-  unit circle, scaled to the `[0, 1]` UV range.
-
-Because the texture is sampled at the fragment level and the texture
-index is uniform across the tile (every fragment of a grassland tile
-samples the grassland texture), UV continuity across tiles is not
-required. Each tile's UVs are independent and reset to the unit hex
-layout.
-
-The `TEXCOORD_0` attribute is added to the mesh alongside `POSITION`,
-`NORMAL`, and `TEXTURE_INDEX`.
-
-### P2.4 Placeholder textures
-
-One PNG per entry in the texture index table. Resolution: 64×64 pixels.
-Content: flat solid color matching the P1 vertex color for that terrain
-type, with a subtle 4-pixel dark border to preserve the tile grid
-appearance.
-
-These are generated programmatically — a short script or build step
-that writes the PNGs. No manual art work. The script lives in
-`tools/gen_placeholder_textures/` and produces files into
-`assets/textures/terrain/`.
-
-**Texture index table (initial):**
-
-| Index | Name | Color | Notes |
+| Index | Name | Source | Notes |
 |---|---|---|---|
-| 0 | `ocean` | `#1a3a5c` | Deep water |
-| 1 | `coast` | `#2e6ea6` | Shallow water |
-| 2 | `tropical_rainforest` | `#2d6a2d` | |
-| 3 | `temperate_forest` | `#4a7c4a` | |
-| 4 | `boreal_forest` | `#4a6b55` | |
-| 5 | `grassland` | `#7a9a3a` | |
-| 6 | `desert` | `#c8a96e` | |
-| 7 | `tundra` | `#8a9a8a` | |
-| 8 | `mountain` | `#5a5a5a` | |
-| 9 | `ocean_hilly` | reserved | (unused; ocean has no hills) |
-| 10–17 | `*_hilly` variants | darkened base | One per land biome + mountain |
+| 0 | `ocean` | Authored (Krita) | Deep water |
+| 1 | `coast` | Authored (Krita) | Shallow water |
+| 2 | `tropical` | Authored (Krita) | `TropicalRainforest` |
+| 3 | `temperate` | Authored (Krita) | `TemperateForest` |
+| 4 | `boreal` | Authored (Krita) | `BorealForest` |
+| 5 | `grassland` | Authored (Krita) | `Grassland` |
+| 6 | `desert` | Authored (Krita) | `Desert` |
+| 7 | `tundra` | Authored (Krita) | `Tundra` |
+| 8 | `mountain` | Authored (Krita) | Mountain peak top face |
+| 9–16 | `*_hilly` variants | Programmatic | Darkened base per land biome |
+| 17 | `side_land` | Programmatic | Side face, flat land tier |
+| 18 | `side_hill` | Programmatic | Side face, hill tier |
+| 19 | `side_mountain` | Programmatic | Side face, mountain tier |
+| 20 | `side_coast` | Programmatic | Side face, coast → ocean |
 
-The hilly variants are separate texture indices even in placeholder form,
-because in P3 they will have distinct authored art (raised geometry
-suggestion, different shading). Encoding them as separate indices now
-avoids a texture pipeline change when P3 art arrives.
+Programmatic textures (hilly variants, side faces): dark desaturated
+versions of the corresponding authored top-face color, with a vertical
+gradient (darker at bottom) to suggest depth. Generated by
+`tools/gen_placeholder_textures/`. The texture array requires uniform
+resolution — all textures must be 256×256 to match the authored set.
+The placeholder generator is updated to produce 256×256 output.
 
-The index-to-terrain mapping lives in `terrain_color.rs`, which is
-renamed to `terrain_lookup.rs` in P2 to reflect its expanded role.
+**Normal recalculation.** Top face normals remain `[0.0, 0.0, 1.0]`
+(pointing up). Side face normals point outward from the prism — each
+side face's normal is the horizontal direction from the tile center to
+the shared edge midpoint. This ensures the directional light shades
+side faces differently from top faces, reinforcing the height reading.
 
-### P2.5 Asset loading
+**Gate for P3.2:** Map visually shows clear elevation tiers. Ocean
+tiles sit below the waterline. Hill tiles are visibly higher than flat
+land. Mountain tiles have peaked tops. Side faces visible between
+elevation transitions. FPS target maintained.
 
-Bevy's asset system loads the texture array at startup. The load is
-async; the chunk spawner system must wait for the texture array to be
-ready before spawning chunk entities. Use Bevy's `Handle<Image>` state
-checking in a run condition or a simple state machine:
+---
+
+### P3.3 Interactive orbit camera
+
+Replace the WASD pan / scroll zoom camera from P1/P2 with a full
+orbit camera that supports pan, zoom, tilt, and rotation. This is the
+camera architecture that remains for the full game.
+
+**Orbit camera model.** The camera is defined by three parameters:
+
+- **Pivot point** — the world-space point the camera looks at, on the
+  terrain surface. Pan moves the pivot.
+- **Distance** — how far the camera is from the pivot. Scroll changes
+  distance.
+- **Angles** — yaw (rotation around the vertical Z axis) and pitch
+  (elevation above the horizon). Right-mouse-drag changes both.
+
+The camera `Transform` is derived from these parameters each frame:
 
 ```
-AppState::LoadingAssets  →  AppState::SpawningChunks  →  AppState::Running
+camera_position = pivot
+    + distance * (
+        cos(pitch) * cos(yaw),   // X component
+        cos(pitch) * sin(yaw),   // Y component
+        sin(pitch)               // Z component
+      )
+camera_look_at = pivot
 ```
 
-This is the first use of `AppState` in the game crate — it will be
-expanded significantly in Stage 4 when the full turn phase state machine
-is implemented. Keep it minimal here: three variants, one transition
-each.
+This is the orbit / arc-ball pattern. The camera always looks at the
+pivot; moving the pivot is the pan operation.
 
-### P2.6 Gate measurement
+Store the orbit state as a `CameraOrbit` resource:
 
-Same pass criteria as P1.5. The textured pipeline must match or beat the
-vertex-color baseline. Record results in ADR-0019 alongside the texture
-pipeline decision rationale.
+```rust
+#[derive(Resource)]
+pub struct CameraOrbit {
+    pub pivot:    Vec3,
+    pub distance: f32,
+    pub yaw:      f32,   // radians; 0 = looking north
+    pub pitch:    f32,   // radians; clamped to [MIN_PITCH, MAX_PITCH]
+}
+```
 
-### P2 file structure additions
+**Controls.**
+
+| Input | Action |
+|---|---|
+| Middle-mouse drag | Pan (move pivot in the camera's ground plane) |
+| Right-mouse drag | Orbit (change yaw and pitch) |
+| Scroll wheel | Zoom (change distance) |
+| WASD / arrow keys | Pan (keyboard alternative) |
+
+**Pitch clamping.** Prevent the camera from going below the terrain or
+flipping upside-down:
+
+```rust
+const MIN_PITCH: f32 = 0.20; // ~11° above horizon — low but not underground
+const MAX_PITCH: f32 = 1.48; // ~85° — nearly top-down
+```
+
+The default pitch for a 4X strategy view is approximately 45°–60°
+(π/4 to π/3 radians). Set the initial pitch to `PI / 3.5` (~51°) as
+the default.
+
+**Zoom clamping.**
+
+```rust
+const MIN_DISTANCE: f32 = 80.0;    // close zoom: individual tiles readable
+const MAX_DISTANCE: f32 = 1_200.0; // far zoom: full map visible
+```
+
+**Pan speed scaling.** Pan speed scales with distance so the map
+doesn't feel sluggish when zoomed out:
+
+```rust
+let pan_speed = orbit.distance * PAN_SPEED_FACTOR;
+```
+
+**Camera bounds.** In P3, pan is clamped to keep the pivot within
+the map bounds (same as P1/P2). Wrap-aware camera (seamless
+east-west pan for the cylindrical map) is deferred to Stage 4.
+
+**Implementation note.** The community crate `bevy_panorbit_camera`
+provides this behaviour out of the box. However, implementing it
+from scratch is recommended here: the game will need custom behaviour
+(terrain-following pivot height, wrap-aware pan, integration with
+tile selection), and understanding the orbit math makes those
+extensions straightforward. The implementation is approximately 120
+lines in `rendering/camera.rs`. ADR-0021 records this decision.
+
+**Gate for P3.3:** Camera orbits correctly. Pitch clamp prevents
+underground or flipped views. Pan keeps pivot in map bounds. Zoom
+range covers from individual tile inspection to full map overview.
+No frame-time cost from camera updates.
+
+---
+
+### P3.4 Forest and resource model instancing
+
+Place biome-matched tree models on forested tiles and resource models
+on resource tiles. This exercises the full 3D model loading pipeline
+and gives a realistic performance baseline for Layer 1 features.
+
+**Forest assets.** Biome-matched variants from Kenney nature kit (CC0):
+
+| Biome | Models |
+|---|---|
+| `TropicalRainforest` | `tree_tropical_A.glb`, `tree_tropical_B.glb` |
+| `TemperateForest` | `tree_temperate_A.glb`, `tree_temperate_B.glb`, `tree_temperate_C.glb` |
+| `BorealForest` | `tree_boreal_A.glb`, `tree_boreal_B.glb` |
+| `Grassland`, `Desert`, `Tundra` | No tree models — these biomes have low or zero forest density in worldgen |
+
+Forest placement uses the tile's `Biome` to select the correct variant
+pool, then picks deterministically within the pool using the tile
+coordinate as a seed.
+
+**Resource assets.** One model per resource, grouped by category:
+
+| Category | Models |
+|---|---|
+| Strategic | `iron_A.glb`, `horses_A.glb` |
+| Luxury | `gold.glb`, `wine.glb`, `gems.glb`, `spices.glb` |
+| Bonus | `wheat.glb`, `stone.glb`, `fish.glb` |
+
+Within luxury and bonus categories, models currently share the same
+mesh. The category grouping is therefore the functional signal: players
+can distinguish strategic from luxury from bonus by model style. Per-
+resource distinct models within a category are a later art pass,
+requiring no code changes — swap the `.glb` file, the lookup table in
+`resource_models.rs` is unchanged.
+
+Resource models are placed at the tile's world-space center, raised
+to terrain surface Z, with no jitter (resources should read as
+deliberately placed, unlike organically scattered trees).
+
+**Scale adjustment.** Kenney models are authored at 1 unit = 1 meter.
+`HEX_SIZE` is 16 world units. Apply a uniform scale to bring models to
+a readable size relative to the hex grid. Different base scales apply
+per asset type — trees are taller than resource icons:
+
+```rust
+const TREE_SCALE: f32 = 8.0;     // tune against terrain geometry
+const RESOURCE_SCALE: f32 = 4.0; // smaller than trees; icons, not landmarks
+```
+
+Exact values require visual tuning after P3.2 geometry is in place.
+
+**Instancing.** Bevy batches entities sharing a mesh and material
+handle into a single draw call automatically. Forest trees: grouped by
+model variant (7 variants → ≤7 draw calls). Resource models: grouped
+by model (9 models → ≤9 draw calls). Total Layer 1 draw calls: ≤16.
+
+For a 240×150 map with ~30% forested tiles above threshold and ~2%
+resource tiles: roughly 10,000–15,000 tree entities and ~700 resource
+entities. Validate draw call count matches expectation during P3.5.
+
+**Placement details.**
+
+*Trees:*
+- One tree per tile where `forest_density > FOREST_THRESHOLD`
+- Variant selected deterministically from biome's pool using
+  `hash(coord) % pool_size`
+- Position jitter: ±20% of `HEX_SIZE` in X and Y, deterministic
+- Rotation jitter: random yaw from `hash(coord)`, no pitch/roll
+
+*Resources:*
+- One model per tile where `ResourceData::resource` is `Some(_)`
+- No position jitter — centered on tile
+- No rotation — resource models face a consistent direction
+
+```rust
+const FOREST_THRESHOLD: f32 = 0.45;
+```
+
+**Asset loading.** All `.glb` files load through Bevy's `AssetServer`
+during `AppState::LoadingAssets`. Forest and resource model handles
+are tracked alongside terrain textures; the state transition to
+`SpawningChunks` waits for all handles to report `LoadState::Loaded`.
+
+**Gate for P3.4:** Biome-matched tree models visible on forested tiles.
+Resource models visible on resource tiles, category-distinguishable by
+model style. All models sit on the terrain surface (correct Z). Draw
+call count ≤ 16 for the full Layer 1. FPS target maintained.
+
+---
+
+### P3.5 Performance measurement and gate
+
+With the full P3 scene active (3D terrain geometry, directional light,
+forest models), measure performance against the P1/P2 baseline.
+
+**Pass criteria:**
+
+- Minimum FPS ≥ 60 during continuous orbit camera movement (pan,
+  rotate, zoom), measured over at least two full map traversals.
+- No frame-time spikes exceeding 2× average during camera movement.
+- Memory footprint < 750 MB (increased from P2's 500 MB budget to
+  account for 3D geometry, lighting, and model assets).
+- No Bevy validation warnings at startup.
+- Forest and resource draw call count confirmed ≤ 16 (instancing working).
+
+**Expected bottlenecks and mitigations:**
+
+*Terrain geometry vertex count.* Hex prisms with side faces have
+significantly more vertices than flat hexes. For 36K tiles with
+average 2 side faces exposed per tile: ~36K × (7 top + 2 × 4 side) =
+~540K vertices per chunk batch. This is well within GPU budget but
+worth measuring. If vertex count becomes an issue, reduce side face
+detail or merge coplanar side faces.
+
+*Forest model count.* 10–15K tree entities with instanced rendering
+should be negligible. If Bevy's automatic batching fails to group
+instances (check with `WGPU_BACKEND=vulkan cargo run` and a frame
+debugger), explicit `GpuInstancing` may be needed.
+
+*Shadow map (if enabled).* Testing with `SHADOWS_ENABLED = true` at
+P3.5 gives the shadow cost baseline even if shadows ship disabled.
+Record both numbers.
+
+Record minimum, average, maximum FPS; peak memory; draw call count
+in ADR-0020.
+
+---
+
+### P3 file structure
+
+Changes from P2. Files marked `(new)` are additions; `(modified)`
+are extensions of existing files.
 
 ```
-crates/game/src/rendering/
-├── terrain_lookup.rs          ← terrain → texture index (replaces terrain_color.rs)
-└── terrain_material.rs        ← custom Material impl + WGSL shader
-
 crates/game/src/
-└── app_state.rs               ← AppState enum (LoadingAssets, SpawningChunks,
-                                  Running)
+├── main.rs                          (unchanged)
+├── app_state.rs                     (modified: add model loading to LoadingAssets)
+└── rendering/
+    ├── mod.rs                       (modified: register new systems, 3D light)
+    ├── hex_mesh.rs                  (modified: prism geometry, side faces,
+    │                                  mountain peak, neighbour height lookup)
+    ├── terrain_lookup.rs            (modified: full texture index table with
+    │                                  authored and programmatic entries)
+    ├── terrain_material.rs          (unchanged: texture array shader still correct)
+    ├── chunk_spawner.rs             (modified: Mesh3d/MeshMaterial3d, water plane)
+    ├── camera.rs                    (replaced: orbit camera replaces 2D pan/zoom)
+    ├── lighting.rs                  (new: DirectionalLight, AmbientLight, ClearColor)
+    ├── forest.rs                    (new: forest model loading and placement)
+    └── resource_models.rs           (new: resource model loading and placement)
 
-assets/textures/terrain/
-├── ocean.png                  ← 64×64 placeholder
-├── coast.png
-├── tropical_rainforest.png
-├── ... (one per table entry above)
-└── mountain_hilly.png
+assets/
+├── worldgen/
+│   └── textures/                    ← authored terrain textures (256×256 PNG)
+│       ├── ocean.png
+│       ├── coast.png
+│       ├── grassland.png
+│       ├── tropical.png
+│       ├── temperate.png
+│       ├── boreal.png
+│       ├── desert.png
+│       ├── tundra.png
+│       └── mountain.png
+├── textures/terrain/                ← programmatically generated (hilly + side faces)
+│   ├── grassland_hilly.png
+│   ├── tropical_hilly.png
+│   ├── temperate_hilly.png
+│   ├── boreal_hilly.png
+│   ├── desert_hilly.png
+│   ├── tundra_hilly.png
+│   ├── mountain_hilly.png
+│   ├── side_land.png
+│   ├── side_hill.png
+│   ├── side_mountain.png
+│   └── side_coast.png
+└── glb-assets/
+    ├── foliage/
+    │   ├── tree_tropical_A.glb
+    │   ├── tree_tropical_B.glb
+    │   ├── tree_temperate_A.glb
+    │   ├── tree_temperate_B.glb
+    │   ├── tree_temperate_C.glb
+    │   ├── tree_boreal_A.glb
+    │   └── tree_boreal_B.glb
+    ├── strategic-resource/
+    │   ├── iron_A.glb
+    │   └── horses_A.glb
+    ├── luxury-resource/
+    │   ├── gold.glb
+    │   ├── wine.glb
+    │   ├── gems.glb
+    │   └── spices.glb
+    └── bonus-resource/
+        ├── wheat.glb
+        ├── stone.glb
+        └── fish.glb
 
 tools/gen_placeholder_textures/
-└── src/main.rs                ← generates assets/textures/terrain/*.png
+└── src/main.rs   (modified: 256×256 output, hilly variants, side face textures)
 ```
 
-### P2 gate: complete when
-
-- App renders map using texture array material.
-- All placeholder textures visible and correctly assigned to terrain types.
-- FPS target met (same criteria as P1).
-- `AppState` loading sequence works: no entities spawn before textures load.
-- ADR-0019 written and accepted.
-
 ---
-
-## Stage P3: Terrain visuals
-
-**Goal:** Replace placeholder textures with authored art sufficient for
-development use. Every terrain type and major feature is visually
-distinct and readable at all zoom levels. This is not final art — it
-is the level of quality needed to build cities, units, and UI against
-without being misled by the visuals.
-
-### P3.1 Art requirements
-
-The following assets are required. All are top-down hex tiles,
-pointy-top orientation, 256×256 pixels, PNG with transparency for
-corners outside the hex boundary.
-
-**Terrain base tiles (Layer 0):**
-
-| Asset | Description |
-|---|---|
-| `ocean.png` | Deep water — dark blue, subtle wave pattern |
-| `coast.png` | Shallow water — lighter blue, suggests shallowing |
-| `grassland.png` | Open plains — green, subtle grass texture |
-| `grassland_hilly.png` | Grassland with visible elevation suggestion |
-| `temperate_forest.png` | Deciduous tree canopy, top-down |
-| `temperate_forest_hilly.png` | Forest on elevation |
-| `boreal_forest.png` | Conifer canopy, darker green |
-| `boreal_forest_hilly.png` | Boreal on elevation |
-| `tropical_rainforest.png` | Dense canopy, rich green |
-| `tropical_rainforest_hilly.png` | Tropical on elevation |
-| `desert.png` | Sandy/rocky, warm tones |
-| `desert_hilly.png` | Desert on elevation |
-| `tundra.png` | Sparse ground cover, cold tones |
-| `tundra_hilly.png` | Tundra on elevation |
-| `mountain.png` | Impassable — clear mountain peak symbol |
-
-**Feature overlay tiles (Layer 1):**
-
-Layer 1 is a separate chunk mesh rendered on top of Layer 0 at a slight
-Z offset. Feature tiles use transparency — only the feature itself is
-opaque; the terrain underneath shows through.
-
-| Asset | Description |
-|---|---|
-| `river.png` | Blue water channel, fits hex edge flow directions |
-| `floodplain.png` | Subtle fertile-land tint overlay |
-| `resource_iron.png` | Iron ore icon, top-down |
-| `resource_horses.png` | Horse icon |
-| `resource_gold.png` | Gold nugget icon |
-| `resource_gems.png` | Gem icon |
-| `resource_spices.png` | Spice plant icon |
-| `resource_wine.png` | Grapevine icon |
-| `resource_wheat.png` | Wheat sheaf icon |
-| `resource_fish.png` | Fish icon (for coast/ocean tiles) |
-| `resource_stone.png` | Stone icon |
-
-Resource icons are small (centered in the hex, approximately 40% of
-tile width) and rendered on top of the terrain texture. They do not
-need to be photorealistic — a clean iconic silhouette is sufficient and
-preferable for readability at small zoom levels.
-
-### P3.2 Art sourcing
-
-Three options in order of preference:
-
-**Option A — CC0 asset packs.** Kenney.nl and itch.io host hex tile
-packs under CC0 / public domain licenses. Check for packs with
-top-down hex terrain in pointy-top orientation. This is the fastest
-path if a suitable pack exists. Adapt colors and icons to match the
-project's terrain type set.
-
-**Option B — AI-generated textures.** Generate tile textures using
-Stable Diffusion or FLUX (both runnable locally given the available
-hardware). Prompt for top-down hex tiles, one terrain type at a time.
-Use ComfyUI for batch generation and upscaling. This requires some
-iteration to get consistent style across tile types but is faster than
-manual authoring.
-
-**Option C — Manual authoring.** Aseprite or similar pixel art tool.
-Pixel art scales well at low resolution and reads clearly at all zoom
-levels. A 256×256 hex tile in pixel art style is achievable without
-professional art skill.
-
-The three options are not mutually exclusive — a CC0 base pack adapted
-with AI-generated or manual icons for the resource overlays is a
-reasonable hybrid.
-
-### P3.3 Feature overlay implementation
-
-Layer 1 is built using the same chunk mesh infrastructure as Layer 0.
-A second `build_feature_chunk_mesh` function in `hex_mesh.rs` produces
-a mesh containing only tiles with features, using the feature texture
-indices and transparency-enabled material.
-
-Feature tiles are sparse — most tiles have no feature. The feature mesh
-skips empty tiles entirely, so its vertex count is proportional to the
-number of tiles with features, not the total tile count.
-
-The feature material differs from the terrain material in one respect:
-`alpha_mode: AlphaMode::Blend` to allow transparency. This is slightly
-more expensive than opaque rendering but the feature layer is sparse,
-so the cost is low.
-
-River rendering in P3 replaces the P1 color tint and P2 placeholder
-texture with directional river tiles — the river texture varies based
-on which edges the river enters and exits. This requires encoding flow
-direction into the feature mesh, which is read from
-`HydrologyData::flow_direction`. There are at most 6 entry edges and 6
-exit edges, giving a finite set of river tile variants (in practice
-far fewer, since rivers have one entry and one exit). Store the variants
-as additional texture array layers.
-
-### P3.4 Resolution upgrade
-
-When P3 art is ready, increase texture resolution from 64×64 (P2
-placeholder) to 256×256 (P3 authored). The texture array is rebuilt;
-no other code changes. Validate that FPS is unaffected — texture
-sampling cost at 256×256 vs 64×64 is negligible on modern hardware.
 
 ### P3 gate: complete when
 
-- All terrain base tile assets present and visible in-game.
-- All feature overlay assets present: rivers, floodplains, resources.
-- Every terrain type and feature is visually distinct and unambiguous
-  at zoom levels 1 through 8.
-- Rivers display directional variants correctly.
-- FPS target maintained.
-- Art source documented (license, origin, any adaptations) in
-  `assets/textures/terrain/SOURCES.md`.
+- App renders 240×150 map as 3D hex prisms with correct elevation tiers.
+- Side faces visible between elevation transitions; mountains peaked.
+- Water plane visible at coast/ocean level.
+- Authored terrain textures (ocean, coast, biomes, mountain) visible
+  and correctly assigned. Programmatic hilly and side face textures
+  present and readable.
+- Orbit camera: pan, zoom, tilt, rotate all functional. Pitch and zoom
+  clamped correctly.
+- Directional light and ambient light applied. Scene readable without
+  shadows.
+- Biome-matched forest models present on forested tiles, instancing
+  confirmed.
+- Resource models present on resource tiles; strategic, luxury, and
+  bonus categories visually distinguishable.
+- All P3.5 performance criteria met and recorded.
+- `assets/glb-assets/SOURCES.md` documents Kenney CC0 license for all
+  model assets.
+- ADR-0020 written: 3D pivot rationale, geometry decisions, measured
+  performance results.
+- ADR-0021 written: orbit camera implementation decision.
+- `documents/architecture/architecture.md` updated: 3D scene
+  architecture described.
+- `documents/planning/implementation-plan.md` updated: P3 marked
+  complete, Stage 4 unblocked.
 
 ---
 
@@ -556,45 +661,63 @@ sampling cost at 256×256 vs 64×64 is negligible on modern hardware.
 
 ### Wrap-aware camera (deferred to Stage 4)
 
-P1 clamps the camera to map bounds. Stage 4 implements the full
-cylindrical wrap: a second copy of the terrain chunk meshes offset by
-one map width, camera teleport when crossing the midpoint, seamless
-east-west pan. This is a camera and chunk spawner change only — the
-mesh building and material code are unaffected.
+P3 clamps the orbit pivot to map bounds. Stage 4 implements seamless
+cylindrical east-west wrap: a second copy of terrain chunk meshes
+offset by one map width to the east, camera pivot teleport when
+crossing the midpoint. This is a `chunk_spawner.rs` and `camera.rs`
+change only — terrain geometry and material code are unaffected.
 
-### Chunk invalidation (deferred to Stage 4+)
+### Chunk invalidation
 
 When a terrain-modifying event occurs (channel digging, deforestation),
 the affected chunk's mesh is rebuilt by calling `build_chunk_mesh`
-again for that chunk and swapping the mesh handle. This is a planned
-extension of `chunk_spawner.rs`, not a new system. No architecture
-change is needed; the chunk entity structure already supports mesh
-handle replacement.
+for that chunk and swapping its `Mesh3d` handle. The chunk entity
+structure already supports handle replacement; no architectural change
+is needed. The forest layer must also be updated for the affected
+chunk's tiles.
 
-### Coordinate system note
+### Coordinate system
 
-The hex geometry in this plan uses the same axial coordinate convention
-as the `coords` crate: `q` is east-west (wrapping), `r` is north-south
-(bounded). The world-space Y axis is vertical on screen: positive `r`
-is south (downward). Bevy's `Camera2dBundle` uses Y-up by default,
-which means positive world Y is upward on screen. The hex center
-formula must negate the Y component to align with Bevy's camera
-convention:
+Axial `q` is east-west (wrapping), `r` is north-south (bounded).
+World-space X increases eastward, Y increases northward, Z increases
+upward (Bevy's right-hand Y-up convention). The hex center formula:
 
 ```rust
-let x = hex_size * (SQRT3 * q + SQRT3 / 2.0 * r);
-let y = -(hex_size * (1.5 * r));  // negate: positive r is southward
+let x = HEX_SIZE * (SQRT3 * q + SQRT3 / 2.0 * r);
+let y = -(HEX_SIZE * 1.5 * r);  // negate: positive r is southward
+let z = ELEVATION_HEIGHTS[height_level as usize];
 ```
 
-This is the one place where the debug_viz and game rendering diverge —
-debug PNGs use image-space (Y-down) while Bevy uses world-space (Y-up).
+The Y negation is unchanged from P1/P2. Z is now meaningful —
+elevation is expressed as actual world-space height.
+
+### Asset pipeline: PNG to BC7
+
+Bevy's asset processor can be configured to compress PNG textures to
+BC7 at build time, storing the compressed result in `imported_assets/`.
+Configure this in `AssetPlugin` during P3 setup:
+
+```rust
+AssetPlugin {
+    mode: AssetMode::Processed,
+    ..Default::default()
+}
+```
+
+Add a `.meta` file for each texture specifying BC7 compression. The
+first build is slower (compression runs); subsequent builds use the
+cached compressed assets. This does not change the texture array
+binding or shader — BC7 is transparent to the sampler. ADR-0019
+should be updated to note this as the production texture format path.
 
 ### ADRs to write
 
-- **ADR-0018** (at P1 gate): Chunked hex mesh rendering approach.
-  Records chunk size choice (16×16), the decision to start with vertex
-  colors rather than textures, the measured performance results, and the
-  known limitation of non-wrap-aware camera in P1.
-- **ADR-0019** (at P2 gate): Texture array over texture atlas. Records
-  the pipeline decision, texture resolution choice (64×64 placeholder,
-  256×256 target), and the `AppState` loading sequence introduction.
+- **ADR-0020** (at P3.5 gate): 3D scene pivot. Records the rationale
+  for moving from 2D flat rendering to a full 3D scene, geometry
+  decisions (stepped elevation tiers, peaked mountains, side faces),
+  lighting setup, and measured performance results with and without
+  shadows.
+- **ADR-0021** (at P3.3 gate): Orbit camera implementation. Records
+  the decision to implement the orbit camera from scratch rather than
+  using `bevy_panorbit_camera`, with rationale (custom terrain-following
+  and wrap-aware extensions would require forking the crate anyway).

@@ -3,8 +3,8 @@
 // Run with:
 //   cargo run --release -p maprender -- --preset tools/maprender/presets/default.ron
 //
-// `renderer` is intentionally explicit. P1 uses VertexColor. P2 will add the
-// texture-array implementation behind the same preset field.
+// `renderer` is intentionally explicit. P1 uses VertexColor; P2 uses
+// TextureArray.
 (
     seed: 1,
     map_size: Medium,

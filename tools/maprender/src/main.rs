@@ -10,7 +10,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use bevy::prelude::*;
+use bevy::{log::LogPlugin, prelude::*};
 use clap::{Parser, ValueEnum};
 use game::rendering::{RenderStartupConfig, RenderingPlugin, TerrainRenderer};
 use serde::Deserialize;
@@ -39,7 +39,7 @@ fn main() -> Result<()> {
 
     App::new()
         .insert_resource(config)
-        .add_plugins(DefaultPlugins)
+        .add_plugins(DefaultPlugins.build().disable::<LogPlugin>())
         .add_plugins(RenderingPlugin)
         .run();
 
@@ -170,6 +170,23 @@ mod tests {
 
         assert_eq!(config.world_params.seed, 1);
         assert_eq!(config.terrain_renderer, TerrainRenderer::VertexColor);
+        assert_eq!(
+            config.world_params.basic.map_size.dimensions(),
+            MapSize::Medium.dimensions()
+        );
+    }
+
+    #[test]
+    fn p2_texture_array_preset_loads() {
+        let preset = RenderPreset::load(Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/presets/p2_texture_array.ron"
+        )))
+        .expect("P2 texture-array render preset should parse");
+        let config = preset.into_startup_config(None, None, None);
+
+        assert_eq!(config.world_params.seed, 1);
+        assert_eq!(config.terrain_renderer, TerrainRenderer::TextureArray);
         assert_eq!(
             config.world_params.basic.map_size.dimensions(),
             MapSize::Medium.dimensions()

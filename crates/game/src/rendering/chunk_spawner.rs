@@ -1,16 +1,28 @@
 //! Startup system that generates the world and spawns terrain chunks.
 #![allow(clippy::needless_pass_by_value)]
 
-use bevy::prelude::{
-    Assets, Color, ColorMaterial, Commands, Component, Mesh, Mesh2d, MeshMaterial2d, ResMut,
-    Resource, Transform, info,
+use bevy::{
+    asset::RenderAssetUsages,
+    image::Image,
+    prelude::{
+        Assets, Color, ColorMaterial, Commands, Component, Handle, Mesh, Mesh2d, MeshMaterial2d,
+        NextState, Res, ResMut, Resource, Transform, info,
+    },
+    render::render_resource::{Extent3d, TextureDimension, TextureFormat},
 };
 use coords::{Coord, MapBounds};
 use worldgen::{WorldData, generate_world};
 
-use crate::rendering::{
-    RenderStartupConfig, TerrainRenderer,
-    hex_mesh::{CHUNK_SIZE, build_vertex_color_chunk_mesh, map_world_size},
+use crate::{
+    app_state::RenderAppState,
+    rendering::{
+        RenderStartupConfig, TerrainRenderer,
+        hex_mesh::{
+            CHUNK_SIZE, build_texture_chunk_mesh, build_vertex_color_chunk_mesh, map_world_size,
+        },
+        terrain_lookup::{TEXTURE_LAYER_COUNT, TEXTURE_SIZE, placeholder_texture_array_data},
+        terrain_material::{TerrainTextureArrayMaterial, configure_placeholder_texture},
+    },
 };
 
 /// Generated world data available to rendering and future game systems.
@@ -31,11 +43,46 @@ pub(crate) struct MapRenderBounds {
 #[derive(Component)]
 struct TerrainChunk;
 
+#[derive(Resource)]
+pub(crate) struct TerrainTextureArray {
+    handle: Handle<Image>,
+}
+
+pub(crate) fn prepare_render_assets(
+    mut commands: Commands,
+    config: Res<RenderStartupConfig>,
+    mut images: ResMut<Assets<Image>>,
+    mut next_state: ResMut<NextState<RenderAppState>>,
+) {
+    if config.terrain_renderer == TerrainRenderer::TextureArray {
+        let mut texture = Image::new(
+            Extent3d {
+                width: TEXTURE_SIZE,
+                height: TEXTURE_SIZE,
+                depth_or_array_layers: TEXTURE_LAYER_COUNT,
+            },
+            TextureDimension::D2,
+            placeholder_texture_array_data(),
+            TextureFormat::Rgba8UnormSrgb,
+            RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+        );
+        configure_placeholder_texture(&mut texture);
+        commands.insert_resource(TerrainTextureArray {
+            handle: images.add(texture),
+        });
+    }
+
+    next_state.set(RenderAppState::SpawningChunks);
+}
+
 pub(crate) fn spawn_chunks(
     mut commands: Commands,
-    config: bevy::prelude::Res<RenderStartupConfig>,
+    config: Res<RenderStartupConfig>,
+    texture_array: Option<Res<TerrainTextureArray>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
+    mut texture_materials: ResMut<Assets<TerrainTextureArrayMaterial>>,
+    mut next_state: ResMut<NextState<RenderAppState>>,
 ) {
     let world = generate_world(&config.world_params)
         .expect("render startup world generation parameters must be valid");
@@ -56,7 +103,23 @@ pub(crate) fn spawn_chunks(
             }
         }
         TerrainRenderer::TextureArray => {
-            panic!("texture-array terrain renderer is reserved for P2 and is not implemented yet");
+            let texture = texture_array
+                .as_ref()
+                .expect("texture-array renderer assets must be prepared before chunk spawning")
+                .handle
+                .clone();
+            let material =
+                texture_materials.add(TerrainTextureArrayMaterial::from_texture(texture));
+
+            for origin in chunk_origins(bounds) {
+                let mesh = build_texture_chunk_mesh(origin, bounds, &world);
+                commands.spawn((
+                    TerrainChunk,
+                    Mesh2d(meshes.add(mesh)),
+                    MeshMaterial2d(material.clone()),
+                    Transform::default(),
+                ));
+            }
         }
     }
 
@@ -70,6 +133,7 @@ pub(crate) fn spawn_chunks(
         height: map_height,
     });
     commands.insert_resource(GeneratedWorld { data: world });
+    next_state.set(RenderAppState::Running);
 }
 
 fn chunk_origins(bounds: MapBounds) -> impl Iterator<Item = Coord> {

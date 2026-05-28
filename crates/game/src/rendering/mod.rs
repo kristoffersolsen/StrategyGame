@@ -3,26 +3,28 @@
 mod camera;
 mod chunk_spawner;
 mod hex_mesh;
-mod terrain_color;
+mod terrain_lookup;
+mod terrain_material;
 
 use bevy::{
     diagnostic::FrameTimeDiagnosticsPlugin,
-    prelude::{App, IntoScheduleConfigs, Plugin, Resource, Startup, Update},
+    prelude::{App, AppExtStates, IntoScheduleConfigs, OnEnter, Plugin, Resource, Update},
+    sprite_render::Material2dPlugin,
 };
 use worldgen::WorldParams;
 
+use crate::app_state::RenderAppState;
+
 /// Selects the terrain renderer implementation used for static terrain chunks.
 ///
-/// The current implementation is the P1 vertex-colour renderer. Texture-based
-/// variants are represented here now so render-gate presets, the tool CLI, and
-/// the production game can switch renderer families without changing startup
-/// plumbing as later stages land.
+/// Render-gate presets, the tool CLI, and the production game all use this
+/// enum so renderer families can be switched without changing startup plumbing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TerrainRenderer {
     /// P1 renderer: terrain identity is encoded directly as mesh vertex colour.
     #[default]
     VertexColor,
-    /// Reserved for P2: texture-array terrain material.
+    /// P2 renderer: terrain identity is encoded as texture-array layer indices.
     TextureArray,
 }
 
@@ -52,11 +54,21 @@ pub struct RenderingPlugin;
 
 impl Plugin for RenderingPlugin {
     fn build(&self, app: &mut App) {
+        terrain_material::load_shader(app);
+
         app.add_plugins(FrameTimeDiagnosticsPlugin::default())
+            .add_plugins(Material2dPlugin::<
+                terrain_material::TerrainTextureArrayMaterial,
+            >::default())
+            .init_state::<RenderAppState>()
             .init_resource::<RenderStartupConfig>()
             .init_resource::<camera::FpsOverlayTimer>()
             .add_systems(
-                Startup,
+                OnEnter(RenderAppState::LoadingAssets),
+                chunk_spawner::prepare_render_assets,
+            )
+            .add_systems(
+                OnEnter(RenderAppState::SpawningChunks),
                 (
                     chunk_spawner::spawn_chunks,
                     camera::spawn_map_camera,

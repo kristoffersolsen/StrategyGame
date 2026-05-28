@@ -27,7 +27,8 @@ For P1, terrain identity is encoded as vertex colour. The colour table is
 a debug-readable placeholder lookup derived from height level, biome,
 hills, and river presence. It is intentionally isolated in
 `terrain_color.rs` so P2 can replace the colour output with texture
-indices without changing chunk iteration or camera systems.
+indices without changing chunk iteration or camera systems. During P2
+this lookup moved to `terrain_lookup.rs`.
 
 Renderer selection is a startup configuration concern, not a hardcoded
 game-main concern. `game::rendering::RenderStartupConfig` carries the
@@ -51,8 +52,8 @@ generated map bounds; seamless cylindrical panning will be handled when
 gameplay camera behavior is designed.
 
 The P1 executable gate is `tools/maprender`, not `crates/game/src/main.rs`.
-`maprender` currently supports `renderer: VertexColor` and reserves
-`renderer: TextureArray` for P2.
+`maprender` supports `renderer: VertexColor` for the P1 baseline and
+`renderer: TextureArray` for the P2 texture-pipeline gate.
 
 ## Consequences
 
@@ -93,8 +94,9 @@ Interactive GPU measurements still need to be recorded from a local run:
 
 | Metric | Result |
 |---|---|
-| Minimum FPS during two full-width pans | Not recorded |
-| Average FPS during two full-width pans | Not recorded |
+| Observed FPS during local P1 run | Maxed the test monitor at 120 FPS |
+| Minimum FPS during two full-width pans | Not recorded separately |
+| Average FPS during two full-width pans | Not recorded separately |
 | Maximum frame-time spike | Not recorded |
 | Peak memory | Not recorded |
 | Bevy startup validation warnings | Not recorded |

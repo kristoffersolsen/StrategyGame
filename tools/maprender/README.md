@@ -21,6 +21,10 @@ you want multi-seed worldgen comparisons or parameter sweeps. Use
 cargo run --release -p maprender -- \
     --preset tools/maprender/presets/default.ron
 
+# Run the P2 texture-array renderer preset:
+cargo run --release -p maprender -- \
+    --preset tools/maprender/presets/p2_texture_array.ron
+
 # Same preset, different seed:
 cargo run --release -p maprender -- \
     --preset tools/maprender/presets/default.ron --seed 42
@@ -102,8 +106,10 @@ Fields:
 | `renderer` | Terrain rendering backend |
 | `tuning` | `worldgen::TuningParams` overrides |
 
-`tools/maprender/presets/default.ron` documents the current P1 baseline.
-Copy it to create named render-test presets.
+`tools/maprender/presets/default.ron` documents the P1 vertex-colour
+baseline. `tools/maprender/presets/p2_texture_array.ron` is the P2
+texture-array gate preset. Copy either file to create named render-test
+presets.
 
 ```bash
 cp tools/maprender/presets/default.ron tools/maprender/presets/large_vertex_color.ron
@@ -116,7 +122,7 @@ cp tools/maprender/presets/default.ron tools/maprender/presets/large_vertex_colo
 | Preset value | CLI value | Status |
 |---|---|---|
 | `VertexColor` | `vertex-color` | Implemented. P1 baseline: flat terrain colours encoded as mesh vertex colours. |
-| `TextureArray` | `texture-array` | Reserved for P2. The option exists so presets and CLI shape remain stable, but running it before P2 is implemented will fail. |
+| `TextureArray` | `texture-array` | Implemented. P2 baseline: terrain layer indices encoded as mesh attributes and sampled from a 64x64 placeholder texture array. |
 
 Renderer selection lives in `game::rendering::RenderStartupConfig`.
 This keeps render tests and the final game compatible: the final game can
@@ -128,13 +134,15 @@ preset.
 ## Recording A Gate Run
 
 For P1, record results in `documents/adr/0018-map-rendering-chunk-rendering-approach.md`.
+For P2, record results in `documents/adr/0019-map-rendering-texture-pipeline.md`.
 
 Minimum useful run:
 
 1. Run `cargo run --release -p maprender -- --preset tools/maprender/presets/default.ron`.
-2. Pan continuously across the full map width at least twice.
-3. Record minimum FPS, average FPS, maximum frame-time spike, and peak memory.
-4. Note any Bevy validation warnings or startup errors.
+2. For P2, run `cargo run --release -p maprender -- --preset tools/maprender/presets/p2_texture_array.ron`.
+3. Pan continuously across the full map width at least twice.
+4. Record minimum FPS, average FPS, maximum frame-time spike, and peak memory.
+5. Note any Bevy validation warnings or startup errors.
 
 The pass criteria are documented in `documents/planning/map-rendering-plan.md`.
 
