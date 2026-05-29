@@ -74,7 +74,7 @@ the orographic precipitation mechanism.
 
 Global temperature shift added after all other calculations. Zero at
 the tuning layer. The advanced-layer `ClimateBand` enum maps to an
-offset applied here (e.g., `IceAge` maps to a negative offset). Not
+offset applied here (e.g., `Cold` maps to a negative offset). Not
 typically tuned directly in presets.
 
 ---
