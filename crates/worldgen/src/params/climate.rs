@@ -4,8 +4,9 @@
 //! field construction, wind field construction, moisture evaporation,
 //! advection, and orographic precipitation.
 //!
-//! See `documents/planning/status.md` §3.2 and `docs/design/overview.md` §1.10 for the
-//! algorithm design and the mathematical model this struct exposes.
+//! See `documents/crates/worldgen/parameters/climate.md` for the
+//! parameter reference and `documents/crates/worldgen/pipeline.md` for
+//! the stage pipeline.
 
 use crate::error::GenerationError;
 
@@ -355,7 +356,8 @@ impl ClimateParams {
     /// Returns the default climate parameters.
     ///
     /// All fields are set to the baseline values established during
-    /// Stage 3.2 tuning (see `documents/planning/status.md` §3.2 parameter table).
+    /// Stage 3.2 tuning (see
+    /// `documents/crates/worldgen/parameters/climate.md`).
     #[must_use]
     pub fn defaults() -> Self {
         Self {

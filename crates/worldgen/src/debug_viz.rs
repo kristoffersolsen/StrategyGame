@@ -163,6 +163,86 @@ fn resource_value_to_id(value: f32) -> Option<ResourceId> {
     }
 }
 
+// ------------- Pixel-per-tile render (in-memory) -------------
+
+/// Renders a one-pixel-per-tile [`RgbImage`] of `field`.
+///
+/// Identical logic to [`dump_field_pixels`] but returns the image
+/// rather than writing it to disk. Used by `maptune` to display debug
+/// figures inline without touching the filesystem.
+///
+/// `to_f32` must return values in `[0.0, 1.0]`; values outside that
+/// range are clamped by the colormap.
+pub fn render_field_pixels<T: Copy>(
+    field: &Field<T>,
+    to_f32: impl Fn(T) -> f32,
+    colormap: &dyn Colormap,
+) -> RgbImage {
+    let bounds = field.bounds();
+    let width = bounds.width();
+    let height = bounds.height();
+    let mut img = RgbImage::new(width, height);
+
+    for (coord, &value) in field.iter_coords() {
+        let px = coord.q.cast_unsigned();
+        let py = coord.r.cast_unsigned();
+        let rgb = colormap.color(to_f32(value));
+        img.put_pixel(px, py, image::Rgb(rgb));
+    }
+
+    img
+}
+
+/// Renders a hex-rasterized [`RgbImage`] of `field`.
+///
+/// Identical logic to [`dump_field_hex`] but returns the image rather
+/// than writing it to disk. Used by `maptune` to display debug figures
+/// inline without touching the filesystem.
+///
+/// `to_f32` must return values in `[0.0, 1.0]`; values outside that
+/// range are clamped by the colormap.
+pub fn render_field_hex<T: Copy>(
+    field: &Field<T>,
+    to_f32: impl Fn(T) -> f32,
+    colormap: &dyn Colormap,
+    hex_size: u32,
+) -> RgbImage {
+    let bounds = field.bounds();
+    let (img_width, img_height) = hex_image_dimensions(bounds.width(), bounds.height(), hex_size);
+    let mut img = RgbImage::new(img_width, img_height);
+
+    for px in img.pixels_mut() {
+        *px = image::Rgb(HEX_BORDER_COLOR);
+    }
+
+    for (coord, &value) in field.iter_coords() {
+        let rgb = colormap.color(to_f32(value));
+        rasterize_hex(&mut img, coord, bounds.width(), hex_size, rgb);
+    }
+
+    img
+}
+
+/// Renders a hex-rasterized [`RgbImage`] from a pre-composed RGB field.
+///
+/// Identical logic to [`dump_rgb_field_hex`] but returns the image
+/// rather than writing it to disk.
+pub fn render_rgb_field_hex(field: &Field<[u8; 3]>, hex_size: u32) -> RgbImage {
+    let bounds = field.bounds();
+    let (img_width, img_height) = hex_image_dimensions(bounds.width(), bounds.height(), hex_size);
+    let mut img = RgbImage::new(img_width, img_height);
+
+    for px in img.pixels_mut() {
+        *px = image::Rgb(HEX_BORDER_COLOR);
+    }
+
+    for (coord, &rgb) in field.iter_coords() {
+        rasterize_hex(&mut img, coord, bounds.width(), hex_size, rgb);
+    }
+
+    img
+}
+
 // ------------- Pixel-per-tile dump -------------
 
 /// Writes a one-pixel-per-tile PNG of `field` to `path`.
@@ -184,24 +264,12 @@ pub fn dump_field_pixels<T: Copy>(
     to_f32: impl Fn(T) -> f32,
     colormap: &dyn Colormap,
 ) -> Result<(), VisError> {
-    let bounds = field.bounds();
-    let width = bounds.width();
-    let height = bounds.height();
-    let mut img = RgbImage::new(width, height);
-
-    for (coord, &value) in field.iter_coords() {
-        // iter_coords yields normalized in-bounds coords: q ∈ [0, width),
-        // r ∈ [0, height), both non-negative.
-        let px = coord.q.cast_unsigned();
-        let py = coord.r.cast_unsigned();
-        let rgb = colormap.color(to_f32(value));
-        img.put_pixel(px, py, image::Rgb(rgb));
-    }
-
-    img.save(path).map_err(|source| VisError::Io {
-        path: path.to_owned(),
-        source,
-    })
+    render_field_pixels(field, to_f32, colormap)
+        .save(path)
+        .map_err(|source| VisError::Io {
+            path: path.to_owned(),
+            source,
+        })
 }
 
 // ------------- Hex-rasterized dump -------------
@@ -231,25 +299,12 @@ pub fn dump_field_hex<T: Copy>(
     colormap: &dyn Colormap,
     hex_size: u32,
 ) -> Result<(), VisError> {
-    let bounds = field.bounds();
-    let (img_width, img_height) = hex_image_dimensions(bounds.width(), bounds.height(), hex_size);
-    let mut img = RgbImage::new(img_width, img_height);
-
-    // Fill background with the border color so the gaps between
-    // hex tiles render as grid lines rather than black voids.
-    for px in img.pixels_mut() {
-        *px = image::Rgb(HEX_BORDER_COLOR);
-    }
-
-    for (coord, &value) in field.iter_coords() {
-        let rgb = colormap.color(to_f32(value));
-        rasterize_hex(&mut img, coord, bounds.width(), hex_size, rgb);
-    }
-
-    img.save(path).map_err(|source| VisError::Io {
-        path: path.to_owned(),
-        source,
-    })
+    render_field_hex(field, to_f32, colormap, hex_size)
+        .save(path)
+        .map_err(|source| VisError::Io {
+            path: path.to_owned(),
+            source,
+        })
 }
 
 /// Writes a one-pixel-per-tile RGB PNG of `field` to `path`.
@@ -293,22 +348,12 @@ pub fn dump_rgb_field_hex(
     path: &Path,
     hex_size: u32,
 ) -> Result<(), VisError> {
-    let bounds = field.bounds();
-    let (img_width, img_height) = hex_image_dimensions(bounds.width(), bounds.height(), hex_size);
-    let mut img = RgbImage::new(img_width, img_height);
-
-    for px in img.pixels_mut() {
-        *px = image::Rgb(HEX_BORDER_COLOR);
-    }
-
-    for (coord, &rgb) in field.iter_coords() {
-        rasterize_hex(&mut img, coord, bounds.width(), hex_size, rgb);
-    }
-
-    img.save(path).map_err(|source| VisError::Io {
-        path: path.to_owned(),
-        source,
-    })
+    render_rgb_field_hex(field, hex_size)
+        .save(path)
+        .map_err(|source| VisError::Io {
+            path: path.to_owned(),
+            source,
+        })
 }
 
 /// Returns the pixel dimensions of a hex-rasterized image for a map

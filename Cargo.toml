@@ -5,8 +5,10 @@ members = [
     "crates/worldgen",
     "crates/game",
     "tools/mapdump",
+    "tools/mapbench",
     "tools/maprender",
     "tools/maptest",
+    "tools/maptune",
 ]
 resolver = "2"
 

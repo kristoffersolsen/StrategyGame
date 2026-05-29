@@ -1,9 +1,9 @@
 //! Procedural world generation pipeline.
 //!
 //! Transforms a seed and a [`WorldParams`] configuration into a complete
-//! [`WorldData`] structure describing a generated map. The pipeline runs
-//! in six stages: tectonics, climate, hydrology, biomes, resources, and
-//! starting position selection.
+//! [`WorldData`] structure describing a generated map. The current pipeline
+//! runs five implemented stages: tectonics, climate, hydrology, biomes,
+//! and resources. Starting position selection is planned as Stage 3.6.
 //!
 //! This crate has no dependency on Bevy and can be run standalone via the
 //! `mapdump` CLI tool. All output is deterministic — the same seed and
@@ -18,7 +18,7 @@
 //! tuning impossible.
 //!
 //! The full RNG-threading strategy is documented in
-//! `docs/adr/0001-determinism-and-rng-threading.md`.
+//! `documents/adr/0001-determinism-and-rng-threading.md`.
 //!
 //! Hard rules enforced by lints and review:
 //! - No `rand::thread_rng` / `rand::rng` anywhere in the workspace.
@@ -39,13 +39,15 @@
 //!     ├─ climate              (stage 3.2, design §1.10)
 //!     ├─ hydrology            (stage 3.3, design §1.11)
 //!     ├─ biomes               (stage 3.4, design §1.12)
-//!     ├─ resources            (stage 3.5, design §1.13)
-//!     └─ starting positions   (stage 3.6, design §1.14)
+//!     └─ resources            (stage 3.5, design §1.13)
+//!
+//! Planned next stage: starting positions (stage 3.6, design §1.14).
 //! ```
 //!
 //! Each stage takes the prior stages' output and contributes its own
-//! sub-structure to [`WorldData`]. See `docs/design/overview.md`
-//! §1.9–1.14 for the algorithm design.
+//! sub-structure to [`WorldData`]. See
+//! `documents/crates/worldgen/pipeline.md` for the implementation
+//! pipeline and `documents/design/worldgen.md` for the design rationale.
 
 pub mod debug_viz;
 mod error;

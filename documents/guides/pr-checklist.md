@@ -31,7 +31,7 @@ fix is in CI, not here.
 
 Run and pass ./scripts/check.sh. This is a replacement for github actions.
 
-### 1. ADRs written for cross-cutting decisions
+### 2. ADRs written for cross-cutting decisions
 
 If this PR makes a decision that meets the ADR criteria from the
 documentation guide §4.2 (affects multiple modules or the build, not
@@ -109,7 +109,14 @@ The `missing_errors_doc` lint catches absence, not staleness. If your PR
 adds `InvalidParam` to `GenerationError`, every function that returns
 `GenerationError` needs its `# Errors` checked.
 
-### 6. documents/architecture/architecture.md updated if workspace structure changed
+### 6. Crate API docs updated if public API changed
+
+If this PR adds or removes a `pub` item in `worldgen`, `coords`, or `game` (i.e., changes
+the `pub use` block in `lib.rs`), update the corresponding
+`documents/crates/<crate>/api.md` file in the same PR. The api docs mirror the
+`lib.rs` re-export block and are the first thing read in new sessions.
+
+### 7. documents/architecture/architecture.md updated if workspace structure changed
 
 `documents/architecture/architecture.md` describes the structure of the codebase. Update it
 when the structure changes:
@@ -149,4 +156,3 @@ become amendments and rebase noise.
 CI may catch things you missed (a new lint failure, a doctest that
 doesn't compile, a test that fails on a clean checkout). Fix those
 before requesting review (even from yourself).
-

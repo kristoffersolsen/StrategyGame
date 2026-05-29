@@ -150,7 +150,7 @@ The new parameters are included in:
 - `tools/maptest/presets/more_land_levels.ron`;
 - `tools/maptest/src/sweep.rs`;
 - `scripts/mapgen_sweep.sh` as commented sweep candidates;
-- `documents/worldgen/tectonics-parameters.md`.
+- `documents/crates/worldgen/parameters/tectonics.md`.
 
 Recommended initial sweeps:
 
@@ -239,4 +239,4 @@ so the correction should be boundary-local.
 - `crates/worldgen/src/params/tectonics.rs` - new parameters and
   validation.
 - `tools/maptest/src/sweep.rs` - sweep exposure.
-- `documents/worldgen/tectonics-parameters.md` - tuning documentation.
+- `documents/crates/worldgen/parameters/tectonics.md` - tuning documentation.

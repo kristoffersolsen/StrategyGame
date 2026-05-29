@@ -196,4 +196,3 @@ to be.
 - `documents/design/design-decisions.md` §1.12 — biome system design
 - `documents/adr/ADR-0008` — biome table as a data asset
 - `assets/worldgen/biome_table.ron` — the table itself
-- `documents/planning/status.md` §3.4 — original stage plan
