@@ -101,49 +101,73 @@ exploring the surroundings and securing borders.
 
 
 #### Systems
-- Basic city management.
+- Basic city management
+- science
 
 #### Units
-- Warrior
-- Archer
+- Warrior (meelee)
+- Archer (ranged)
 - Worker
 - Scout
 
 #### Districts
 - City Center
 - Defensive
+- neighborhood
 
 #### Buildings
-- Farm
-- City center
+- City hall (city center)
+- watchtower (defensive)
+- house (neighborhood)
 
-#### Outposts
-- None yet
+#### outpost specializations
+- farming
+- mining
 
 
 ---
 
 ### Classical Era (Iron Age)
+focus on science and culture. this should also be an expansion era, where borders are still growing but some contention is happening. inspiration for this is ancient greece.
 
 #### Systems
-
+-culture
+-governments
+-policies
 
 #### Units
+- spearmen (anti cavalry)
+- swordsman (meelee)
+- ballista (siege)
 
+#### Districts
+- science
+- Culture
+- production
 
 #### Buildings
+- amphitheater (culture) - provides culture
+- academy (science) - provides science
+- Smith (production) - boosts city production
+- walls (defensive) - must be destroyed before moving past
 
 ---
 
 ### Medieval Era
+Also called the dark ages, there should be less focus on science and cultural. borders should be fully formed. happiness and luxury resources should essensial as populations grow.
 
 #### Systems
 
-
 #### Units
+- catapult (siege)
 
+#### Districs
 
 #### Buildings
+
+
+#### Outpost specialization
+- Castle
 
 ---
 
