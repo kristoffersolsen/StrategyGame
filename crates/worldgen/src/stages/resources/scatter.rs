@@ -5,7 +5,7 @@ use rand::RngExt;
 
 use crate::params::ResourceParams;
 use crate::rng::StageRng;
-use crate::world_data::{MineralCharacter, ResourceData, ResourceId, TectonicData};
+use crate::world_data::{MineralCharacter, ResourceData, ResourceHandle, TectonicData};
 
 use super::config::ResourceEntry;
 use super::filter::Eligibility;
@@ -23,7 +23,7 @@ pub(super) struct ScatterState<'a, 'b> {
 }
 
 /// Returns a resource's eligible tiles, or an empty slice if absent.
-pub(super) fn eligible_tiles(eligibility: &Eligibility, resource: ResourceId) -> &[Coord] {
+pub(super) fn eligible_tiles(eligibility: &Eligibility, resource: ResourceHandle) -> &[Coord] {
     eligibility
         .get(&resource)
         .map_or(&[] as &[Coord], Vec::as_slice)
@@ -42,7 +42,7 @@ pub(super) fn target_count(eligible_count: usize, entry: &ResourceEntry, abundan
 
 /// Places uniformly selected eligible tiles, respecting occupancy and spacing.
 pub(super) fn place_uniform(
-    resource: ResourceId,
+    resource: ResourceHandle,
     eligible: &[Coord],
     target: usize,
     min_spacing: u8,
@@ -73,7 +73,7 @@ pub(super) fn place_uniform(
 /// Places plate-weighted eligible tiles, respecting occupancy and spacing.
 pub(super) fn place_weighted(
     tectonics: &TectonicData,
-    resource: ResourceId,
+    resource: ResourceHandle,
     entry: &ResourceEntry,
     eligible: &[Coord],
     target: usize,

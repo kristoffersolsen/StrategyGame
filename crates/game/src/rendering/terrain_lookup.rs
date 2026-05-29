@@ -9,7 +9,7 @@ use bevy::{
     render::render_resource::TextureFormat,
 };
 use coords::Coord;
-use worldgen::{Biome, WorldData};
+use worldgen::WorldData;
 
 pub(crate) const TEXTURE_SIZE: u32 = 64;
 pub(crate) const TEXTURE_LAYER_COUNT: u32 = 18;
@@ -34,8 +34,9 @@ pub(crate) fn tile_color(world: &WorldData, coord: Coord, mountain_level: u8) ->
         1 => COAST,
         level if level >= mountain_level => MOUNTAIN,
         _ => {
-            let biome = world.biomes.biome.get(coord).copied().flatten();
-            let mut color = biome.map_or(hex_color(0x7a, 0x9a, 0x3a), biome_color);
+            let biome_handle = world.biomes.biome.get(coord).copied().flatten();
+            let biome_id = biome_handle.map(|h| world.biome_registry.id_of(h));
+            let mut color = biome_id.map_or(hex_color(0x7a, 0x9a, 0x3a), biome_color);
             if world
                 .tectonics
                 .is_hilly
@@ -82,15 +83,11 @@ pub(crate) fn texture_index(world: &WorldData, coord: Coord, mountain_level: u8)
             }
         }
         _ => {
-            let biome = world.biomes.biome.get(coord).copied().flatten();
-            let base = match biome.unwrap_or(Biome::Grassland) {
-                Biome::TropicalRainforest => 2,
-                Biome::TemperateForest => 3,
-                Biome::BorealForest => 4,
-                Biome::Grassland => 5,
-                Biome::Desert => 6,
-                Biome::Tundra => 7,
-            };
+            let biome_handle = world.biomes.biome.get(coord).copied().flatten();
+            let grassland_handle = world.biome_registry.resolve("grassland");
+            let effective_handle = biome_handle.or(grassland_handle);
+            let biome_id = effective_handle.map_or("grassland", |h| world.biome_registry.id_of(h));
+            let base = biome_texture_index(biome_id);
 
             if is_hilly(world, coord) {
                 base + 9
@@ -114,15 +111,11 @@ pub(crate) fn p3_texture_index(world: &WorldData, coord: Coord, mountain_level: 
         1 => 1,
         level if level >= mountain_level => 8,
         _ => {
-            let biome = world.biomes.biome.get(coord).copied().flatten();
-            let base = match biome.unwrap_or(Biome::Grassland) {
-                Biome::TropicalRainforest => 2,
-                Biome::TemperateForest => 3,
-                Biome::BorealForest => 4,
-                Biome::Grassland => 5,
-                Biome::Desert => 6,
-                Biome::Tundra => 7,
-            };
+            let biome_handle = world.biomes.biome.get(coord).copied().flatten();
+            let grassland_handle = world.biome_registry.resolve("grassland");
+            let effective_handle = biome_handle.or(grassland_handle);
+            let biome_id = effective_handle.map_or("grassland", |h| world.biome_registry.id_of(h));
+            let base = biome_texture_index(biome_id);
 
             if is_hilly(world, coord) {
                 base + 9
@@ -130,6 +123,18 @@ pub(crate) fn p3_texture_index(world: &WorldData, coord: Coord, mountain_level: 
                 base
             }
         }
+    }
+}
+
+fn biome_texture_index(id: &str) -> u32 {
+    match id {
+        "tropical_rainforest" => 2,
+        "temperate_forest" => 3,
+        "boreal_forest" => 4,
+        "desert" => 6,
+        "tundra" => 7,
+        // "grassland" and all unknown biomes use grassland texture index
+        _ => 5,
     }
 }
 
@@ -206,14 +211,15 @@ fn is_hilly(world: &WorldData, coord: Coord) -> bool {
         .unwrap_or(false)
 }
 
-fn biome_color(biome: Biome) -> LinearRgba {
-    match biome {
-        Biome::TropicalRainforest => hex_color(0x2d, 0x6a, 0x2d),
-        Biome::TemperateForest => hex_color(0x4a, 0x7c, 0x4a),
-        Biome::BorealForest => hex_color(0x4a, 0x6b, 0x55),
-        Biome::Grassland => hex_color(0x7a, 0x9a, 0x3a),
-        Biome::Desert => hex_color(0xc8, 0xa9, 0x6e),
-        Biome::Tundra => hex_color(0x8a, 0x9a, 0x8a),
+fn biome_color(id: &str) -> LinearRgba {
+    match id {
+        "tropical_rainforest" => hex_color(0x2d, 0x6a, 0x2d),
+        "temperate_forest" => hex_color(0x4a, 0x7c, 0x4a),
+        "boreal_forest" => hex_color(0x4a, 0x6b, 0x55),
+        "desert" => hex_color(0xc8, 0xa9, 0x6e),
+        "tundra" => hex_color(0x8a, 0x9a, 0x8a),
+        // "grassland" and all unknown biomes use grassland color
+        _ => hex_color(0x7a, 0x9a, 0x3a),
     }
 }
 
@@ -221,12 +227,12 @@ fn texture_layer_color(layer: u32) -> LinearRgba {
     match layer {
         0 | 9 => OCEAN,
         1 | 10 => COAST,
-        2 | 11 => biome_color(Biome::TropicalRainforest),
-        3 | 12 => biome_color(Biome::TemperateForest),
-        4 | 13 => biome_color(Biome::BorealForest),
-        5 | 14 => biome_color(Biome::Grassland),
-        6 | 15 => biome_color(Biome::Desert),
-        7 | 16 => biome_color(Biome::Tundra),
+        2 | 11 => biome_color("tropical_rainforest"),
+        3 | 12 => biome_color("temperate_forest"),
+        4 | 13 => biome_color("boreal_forest"),
+        5 | 14 => biome_color("grassland"),
+        6 | 15 => biome_color("desert"),
+        7 | 16 => biome_color("tundra"),
         8 | 17 => MOUNTAIN,
         _ => unreachable!("placeholder texture layer must be in the P2 terrain table"),
     }

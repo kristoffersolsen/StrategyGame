@@ -4,10 +4,14 @@ use coords::{Coord, MapBounds};
 
 use crate::Field;
 use crate::params::BiomeParams;
-use crate::world_data::{Biome, HydrologyData, RiverSize};
+use crate::world_data::{BiomeHandle, HydrologyData, RiverSize};
 
 use super::BiomeTable;
 
+// These influence thresholds are intentional generation constants: they encode
+// the relative "fertility influence" of each hydrology feature. They are NOT
+// tuning knobs (changing them would require retuning the hydrology_override_strength
+// param), so they stay as constants rather than moving to BiomeParams.
 const FLOODPLAIN_INFLUENCE: f32 = 1.0;
 const LAKE_ADJACENT_INFLUENCE: f32 = 1.0;
 const MAJOR_RIVER_INFLUENCE: f32 = 1.0;
@@ -20,7 +24,7 @@ pub(super) fn apply_hydrology_overrides(
     hydrology: &HydrologyData,
     params: &BiomeParams,
     table: &BiomeTable,
-    biome: &mut Field<Option<Biome>>,
+    biome: &mut Field<Option<BiomeHandle>>,
 ) {
     if params.hydrology_override_strength <= 0.0 {
         return;
@@ -31,7 +35,8 @@ pub(super) fn apply_hydrology_overrides(
         let Some(current) = value else {
             continue;
         };
-        let Some(&replacement) = table.hydrology_overrides.get(&current) else {
+        // Dense handle-indexed lookup: O(1) instead of BTreeMap lookup.
+        let Some(replacement) = table.hydrology_overrides[current.index()] else {
             continue;
         };
         let influence = hydrology_influence(bounds, hydrology, coord);

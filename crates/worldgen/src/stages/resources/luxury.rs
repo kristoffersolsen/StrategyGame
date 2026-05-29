@@ -4,12 +4,18 @@ use coords::Coord;
 use rand::RngExt;
 
 use crate::rng::StageRng;
-use crate::world_data::{ResourceData, ResourceId, TectonicData};
+use crate::world_data::{ResourceData, ResourceHandle, TectonicData};
 
 use super::config::ResourceEntry;
 use super::filter::Eligibility;
 use super::{PlacementContext, scatter};
 
+// MIN_CLUSTER_SIZE and MAX_CLUSTER_SIZE are design constants for the cluster
+// expansion algorithm. They encode the intended "feel" of luxury deposit
+// clusters (2–4 tiles). They are not tuning knobs: changing them would alter
+// the spatial character of luxury deposits in a way that is better controlled
+// through rarity and min_spacing. They stay as constants rather than
+// BiomeParams fields because they are algorithm invariants, not tuning knobs.
 const MIN_CLUSTER_SIZE: usize = 2;
 const MAX_CLUSTER_SIZE: usize = 4;
 
@@ -55,7 +61,7 @@ pub(super) fn place_luxury_resources(
 
 fn place_clustered_concentration(
     tectonics: &TectonicData,
-    resource: ResourceId,
+    resource: ResourceHandle,
     entry: &ResourceEntry,
     eligible: &[Coord],
     target: usize,
@@ -102,7 +108,7 @@ fn place_clustered_concentration(
 }
 
 fn expand_cluster(
-    resource: ResourceId,
+    resource: ResourceHandle,
     seed: Coord,
     entry: &ResourceEntry,
     eligible: &[Coord],

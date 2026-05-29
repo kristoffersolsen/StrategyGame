@@ -73,12 +73,12 @@ use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use tracing::info;
 use worldgen::{
-    BasicParams, Biome, BiomeData, BoundaryType, ClimateData, Direction, Field, HydrologyData,
-    MapSize, ResourceData, ResourceId, RiverSize, TectonicData, TuningParams, WorldParams,
+    BasicParams, BiomeData, BoundaryType, ClimateData, Direction, Field, HydrologyData, MapSize,
+    ResourceData, RiverSize, TectonicData, TuningParams, WorldData, WorldParams,
     debug_viz::{
         BiomeCmap, BoundaryCmap, Categorical, Colormap, Grayscale, HeightLevelCmap, ResourceCmap,
-        Viridis, dump_field_hex, dump_field_pixels, dump_field_with_seed_overlay,
-        dump_rgb_field_hex,
+        Viridis, biome_handle_to_f32, dump_field_hex, dump_field_pixels,
+        dump_field_with_seed_overlay, dump_rgb_field_hex, resource_handle_to_f32,
     },
     generate_world,
 };
@@ -141,8 +141,8 @@ fn main() -> Result<()> {
         &args.output,
         args.hex_size,
     )?;
-    write_biomes(&world.biomes, &args.output, args.hex_size)?;
-    write_resources(&world.resources, &args.output, args.hex_size)?;
+    write_biomes(&world.biomes, &args.output, args.hex_size, &world)?;
+    write_resources(&world.resources, &args.output, args.hex_size, &world)?;
 
     info!("done");
     Ok(())
@@ -637,14 +637,15 @@ fn river_size_to_f32(river_size: Option<RiverSize>) -> f32 {
 
 // ------------- Output helpers (biomes) -------------
 
-fn write_biomes(biomes: &BiomeData, output: &Path, hex_size: u32) -> Result<()> {
+fn write_biomes(biomes: &BiomeData, output: &Path, hex_size: u32, world: &WorldData) -> Result<()> {
     let biome_path = output.join("34_01_biomes_hex.png");
     info!(path = %biome_path.display(), "writing biome PNG");
+    let biome_cmap = BiomeCmap::new(&world.biome_registry);
     dump_field_hex(
         &biomes.biome,
         &biome_path,
-        biome_to_f32,
-        &BiomeCmap,
+        biome_handle_to_f32,
+        &biome_cmap,
         hex_size,
     )
     .with_context(|| format!("failed to write {}", biome_path.display()))?;
@@ -657,40 +658,34 @@ fn write_biomes(biomes: &BiomeData, output: &Path, hex_size: u32) -> Result<()> 
     Ok(())
 }
 
-fn biome_to_f32(biome: Option<Biome>) -> f32 {
-    match biome {
-        None => 0.0,
-        Some(Biome::TropicalRainforest) => 1.0,
-        Some(Biome::TemperateForest) => 2.0,
-        Some(Biome::BorealForest) => 3.0,
-        Some(Biome::Grassland) => 4.0,
-        Some(Biome::Desert) => 5.0,
-        Some(Biome::Tundra) => 6.0,
-    }
-}
-
 // ------------- Output helpers (resources) -------------
 
-fn write_resources(resources: &ResourceData, output: &Path, hex_size: u32) -> Result<()> {
+fn write_resources(
+    resources: &ResourceData,
+    output: &Path,
+    hex_size: u32,
+    world: &WorldData,
+) -> Result<()> {
     let combined_path = output.join("35_01_resources_hex.png");
     info!(path = %combined_path.display(), "writing resources PNG");
+    let resource_cmap = ResourceCmap::new(&world.resource_registry);
     dump_field_hex(
         &resources.resource,
         &combined_path,
-        resource_to_f32,
-        &ResourceCmap,
+        resource_handle_to_f32,
+        &resource_cmap,
         hex_size,
     )
     .with_context(|| format!("failed to write {}", combined_path.display()))?;
 
-    for &resource in ResourceId::ALL {
-        let path = output.join(format!("35_02_resource_{}_px.png", resource_name(resource)));
-        info!(path = %path.display(), resource = ?resource, "writing resource overlay PNG");
+    for (handle, id) in world.resource_registry.inner.iter() {
+        let path = output.join(format!("35_02_resource_{id}_px.png"));
+        info!(path = %path.display(), resource = %id, "writing resource overlay PNG");
         dump_field_pixels(
             &resources.resource,
             &path,
             |tile| {
-                if tile == Some(resource) { 1.0 } else { 0.0 }
+                if tile == Some(handle) { 1.0 } else { 0.0 }
             },
             &Grayscale,
         )
@@ -698,35 +693,6 @@ fn write_resources(resources: &ResourceData, output: &Path, hex_size: u32) -> Re
     }
 
     Ok(())
-}
-
-fn resource_to_f32(resource: Option<ResourceId>) -> f32 {
-    match resource {
-        None => 0.0,
-        Some(ResourceId::Iron) => 1.0,
-        Some(ResourceId::Horses) => 2.0,
-        Some(ResourceId::Gold) => 3.0,
-        Some(ResourceId::Gems) => 4.0,
-        Some(ResourceId::Spices) => 5.0,
-        Some(ResourceId::Wine) => 6.0,
-        Some(ResourceId::Wheat) => 7.0,
-        Some(ResourceId::Fish) => 8.0,
-        Some(ResourceId::Stone) => 9.0,
-    }
-}
-
-fn resource_name(resource: ResourceId) -> &'static str {
-    match resource {
-        ResourceId::Iron => "iron",
-        ResourceId::Horses => "horses",
-        ResourceId::Gold => "gold",
-        ResourceId::Gems => "gems",
-        ResourceId::Spices => "spices",
-        ResourceId::Wine => "wine",
-        ResourceId::Wheat => "wheat",
-        ResourceId::Fish => "fish",
-        ResourceId::Stone => "stone",
-    }
 }
 
 const LAKE_COLOR: [u8; 3] = [0, 170, 170];

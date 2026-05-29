@@ -4,7 +4,7 @@ use coords::{Coord, MapBounds};
 
 use crate::Field;
 use crate::params::BiomeParams;
-use crate::world_data::{Biome, ClimateData, HydrologyData};
+use crate::world_data::{BiomeHandle, ClimateData, HydrologyData};
 
 use super::BiomeTable;
 
@@ -16,7 +16,7 @@ pub(super) fn assign_base_biomes(
     params: &BiomeParams,
     mountain_level: u8,
     table: &BiomeTable,
-) -> Field<Option<Biome>> {
+) -> Field<Option<BiomeHandle>> {
     let temperature_range = scalar_range(&climate.temperature, |coord| {
         is_biome_eligible(coord, hydrology, mountain_level)
     });

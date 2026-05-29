@@ -52,7 +52,7 @@ const DEFAULT_RESOURCE_CONFIG_PATH: &str = "assets/worldgen/resources.ron";
 /// holds `Vec<f32>` proportions. Determinism does not require `Eq` —
 /// generation hashes the bit pattern via the determinism scaffold
 /// (see Stage 2.4).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct WorldParams {
     /// Master RNG seed. Every stage derives a sub-RNG from this value.
     pub seed: u64,
@@ -63,9 +63,25 @@ pub struct WorldParams {
     /// Full tunability layer — every internal generation knob.
     pub tuning: TuningParams,
     /// Path to the designer-editable biome lookup table.
+    ///
+    /// Skipped during serialization; the application layer sets the
+    /// correct path when constructing `WorldParams`.
+    #[serde(skip, default = "default_biome_table_path")]
     pub biome_table_path: PathBuf,
     /// Path to the designer-editable resource placement config.
+    ///
+    /// Skipped during serialization; the application layer sets the
+    /// correct path when constructing `WorldParams`.
+    #[serde(skip, default = "default_resource_config_path")]
     pub resource_config_path: PathBuf,
+}
+
+fn default_biome_table_path() -> PathBuf {
+    PathBuf::from(DEFAULT_BIOME_TABLE_PATH)
+}
+
+fn default_resource_config_path() -> PathBuf {
+    PathBuf::from(DEFAULT_RESOURCE_CONFIG_PATH)
 }
 
 impl WorldParams {
@@ -120,7 +136,7 @@ impl Default for WorldParams {
 // ------------- Basic layer -------------
 
 /// Flavor layer parameters. See [`MapArchetype`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct BasicParams {
     /// High-level map shape archetype.
     pub map_size: MapSize,
@@ -146,11 +162,14 @@ impl Default for BasicParams {
 }
 
 /// High-level continental arrangement. Design doc §1.15 Basic layer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, Default,
+)]
 pub enum MapArchetype {
     /// Single supercontinent with peripheral islands.
     Pangaea,
     /// Several medium continents separated by ocean.
+    #[default]
     Continents,
     /// Many small landmasses with significant ocean.
     Archipelago,
@@ -160,6 +179,7 @@ pub enum MapArchetype {
 
 // ------------- Advanced layer -------------
 
+// Note: AdvancedParams is intentionally not Eq because `land_fraction` is f32.
 /// Strategic layer parameters. Sliders the player adjusts to choose a
 /// playable strategic environment.
 ///
@@ -174,7 +194,7 @@ pub enum MapArchetype {
 ///
 /// Map shape modifier and river density are deferred until their
 /// generation stages exist to consume them.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AdvancedParams {
     /// Target fraction of tiles that are land. Range `[0.0, 1.0]`,
     /// recommended `0.3..=0.6`.
@@ -220,7 +240,7 @@ impl Default for AdvancedParams {
 ///
 /// Default is [`Self::Medium`] (240×150 ≈ 36k tiles), the working
 /// assumption from design doc §1.6.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum MapSize {
     /// 120×80, ≈ 9.6k tiles.
     Small,
@@ -262,7 +282,9 @@ impl MapSize {
 }
 
 /// Global temperature shift applied during climate generation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
 pub enum ClimateBand {
     /// Lower global temperature; more tundra and boreal.
     Cold,
@@ -274,7 +296,9 @@ pub enum ClimateBand {
 }
 
 /// World age affects mountain prevalence and erosion smoothness.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
 pub enum WorldAge {
     /// Sharp, recently uplifted mountains; less erosion.
     Young,
@@ -286,7 +310,9 @@ pub enum WorldAge {
 }
 
 /// Density of placed luxury and strategic resources.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
 pub enum ResourceAbundance {
     /// Roughly 60% of standard placement count.
     Scarce,
@@ -381,6 +407,60 @@ impl Default for TuningParams {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Prints the default params as RON for `default_params.ron` generation.
+    ///
+    /// Run with `cargo test -p worldgen print_default_params -- --nocapture`
+    /// to regenerate the asset file when defaults change.
+    #[test]
+    fn print_default_params() {
+        let params = WorldParams::default();
+        let ron_str = ron::ser::to_string_pretty(&params, ron::ser::PrettyConfig::default())
+            .expect("serialize default params to RON");
+        println!("\n{ron_str}\n");
+    }
+
+    #[test]
+    fn default_params_ron_file_loads_as_defaults() {
+        let path = std::path::Path::new("assets/worldgen/default_params.ron");
+        // Try both relative and workspace-rooted paths (matches read_table_file pattern)
+        let content = if let Ok(s) = std::fs::read_to_string(path) {
+            s
+        } else {
+            let ws_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../..")
+                .join(path);
+            std::fs::read_to_string(&ws_path)
+                .expect("failed to read default_params.ron from workspace root")
+        };
+        let parsed: WorldParams = ron::from_str(&content).expect("parse default_params.ron");
+        assert!(
+            parsed.tuning.is_all_default(),
+            "default_params.ron tuning must be all-default"
+        );
+        assert_eq!(parsed.basic, BasicParams::default());
+        assert_eq!(parsed.seed, 0);
+    }
+
+    #[test]
+    fn default_params_ron_roundtrip() {
+        let params = WorldParams::default();
+        let ron_str = ron::ser::to_string_pretty(&params, ron::ser::PrettyConfig::default())
+            .expect("serialize default params to RON");
+        let parsed: WorldParams = ron::from_str(&ron_str).expect("deserialize default params RON");
+        // Seed, basic, advanced must match.
+        assert_eq!(params.seed, parsed.seed);
+        assert_eq!(params.basic, parsed.basic);
+        assert_eq!(params.advanced.player_count, parsed.advanced.player_count);
+        assert_eq!(params.advanced.climate_band, parsed.advanced.climate_band);
+        assert_eq!(params.advanced.world_age, parsed.advanced.world_age);
+        assert_eq!(
+            params.advanced.resource_abundance,
+            parsed.advanced.resource_abundance
+        );
+        assert!(params.tuning.is_all_default());
+        assert!(parsed.tuning.is_all_default());
+    }
 
     #[test]
     fn default_params_pass_validation() {

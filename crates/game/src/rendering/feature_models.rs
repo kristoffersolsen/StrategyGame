@@ -7,7 +7,7 @@ use bevy::{
 };
 use coords::{Coord, MapBounds};
 use tracing::info;
-use worldgen::{Biome, ResourceId, WorldData};
+use worldgen::WorldData;
 
 use crate::rendering::hex_mesh::{HEX_SIZE, tile_center_position};
 
@@ -113,26 +113,27 @@ impl FeatureModelAssets {
         }
     }
 
-    fn tree_pool(&self, biome: Biome) -> Option<&[Handle<Scene>]> {
-        match biome {
-            Biome::TropicalRainforest => Some(&self.tropical_trees),
-            Biome::TemperateForest => Some(&self.temperate_trees),
-            Biome::BorealForest => Some(&self.boreal_trees),
-            Biome::Grassland | Biome::Desert | Biome::Tundra => None,
+    fn tree_pool(&self, biome_id: &str) -> Option<&[Handle<Scene>]> {
+        match biome_id {
+            "tropical_rainforest" => Some(&self.tropical_trees),
+            "temperate_forest" => Some(&self.temperate_trees),
+            "boreal_forest" => Some(&self.boreal_trees),
+            _ => None,
         }
     }
 
-    fn resource_model(&self, resource: ResourceId) -> &Handle<Scene> {
-        match resource {
-            ResourceId::Iron => &self.iron,
-            ResourceId::Horses => &self.horses,
-            ResourceId::Gold => &self.gold,
-            ResourceId::Gems => &self.gems,
-            ResourceId::Spices => &self.spices,
-            ResourceId::Wine => &self.wine,
-            ResourceId::Wheat => &self.wheat,
-            ResourceId::Fish => &self.fish,
-            ResourceId::Stone => &self.stone,
+    fn resource_model(&self, resource_id: &str) -> Option<&Handle<Scene>> {
+        match resource_id {
+            "iron" => Some(&self.iron),
+            "horses" => Some(&self.horses),
+            "gold" => Some(&self.gold),
+            "gems" => Some(&self.gems),
+            "spices" => Some(&self.spices),
+            "wine" => Some(&self.wine),
+            "wheat" => Some(&self.wheat),
+            "fish" => Some(&self.fish),
+            "stone" => Some(&self.stone),
+            _ => None,
         }
     }
 }
@@ -153,10 +154,11 @@ pub(crate) fn spawn_feature_models(
         if *density <= FOREST_THRESHOLD {
             continue;
         }
-        let Some(biome) = world.biomes.biome.get(coord).copied().flatten() else {
+        let Some(biome_handle) = world.biomes.biome.get(coord).copied().flatten() else {
             continue;
         };
-        let Some(pool) = assets.tree_pool(biome) else {
+        let biome_id = world.biome_registry.id_of(biome_handle);
+        let Some(pool) = assets.tree_pool(biome_id) else {
             continue;
         };
         let model = select_handle(pool, coord, 0xA53D_91F2);
@@ -171,18 +173,25 @@ pub(crate) fn spawn_feature_models(
         counts.trees += 1;
     }
 
+    // Resolve the fish handle once so we can check for water placement.
+    let fish_handle = world.resource_registry.resolve("fish");
+
     for (coord, resource) in world.resources.resource.iter_coords() {
-        let Some(resource) = *resource else {
+        let Some(resource_handle) = *resource else {
+            continue;
+        };
+        let resource_id = world.resource_registry.id_of(resource_handle);
+        let Some(model) = assets.resource_model(resource_id) else {
             continue;
         };
         let [x, y, terrain_z] = tile_center_position(world, bounds, coord);
-        let z = if resource == ResourceId::Fish {
+        let z = if Some(resource_handle) == fish_handle {
             FISH_Z
         } else {
             terrain_z + RESOURCE_Z_OFFSET
         };
         commands.spawn((
-            SceneRoot(assets.resource_model(resource).clone()),
+            SceneRoot(model.clone()),
             Transform::from_translation(Vec3::new(x, y, z))
                 .with_rotation(model_rotation(coord))
                 .with_scale(Vec3::splat(RESOURCE_SCALE)),

@@ -67,8 +67,9 @@ pub use params::{
     ResourceAbundance, ResourceParams, TectonicsParams, TuningParams, WorldAge, WorldParams,
 };
 pub use world_data::{
-    Biome, BiomeData, BoundaryType, ClimateData, HydrologyData, MineralCharacter, MotionVector,
-    Plate, PlateId, PlateType, ResourceData, ResourceId, RiverSize, TectonicData, WorldData,
+    BiomeData, BiomeHandle, BiomeRegistry, BoundaryType, ClimateData, Handle, HydrologyData,
+    MineralCharacter, MotionVector, Plate, PlateId, PlateType, ResourceCategory, ResourceData,
+    ResourceHandle, ResourceRegistry, RiverSize, TectonicData, WorldData,
 };
 
 use coords::MapBounds;
@@ -105,9 +106,15 @@ pub fn generate_world(params: &WorldParams) -> Result<WorldData, GenerationError
     let master = MasterRng::new(params.seed);
     let biome_table =
         stages::biomes::BiomeTable::load(&params.biome_table_path, &params.tuning.biomes)?;
-    let resource_config = stages::resources::ResourceConfig::load(&params.resource_config_path)?;
+    let resource_config = stages::resources::ResourceConfig::load(
+        &params.resource_config_path,
+        biome_table.registry(),
+    )?;
 
-    let mut world = WorldData::new(bounds);
+    let biome_registry = biome_table.registry().clone();
+    let resource_registry = resource_config.resource_registry().clone();
+
+    let mut world = WorldData::new(bounds, biome_registry, resource_registry);
 
     // Stage 3.1: tectonics.
     let mut tectonic_rng = master.fork(StageId::Tectonics);

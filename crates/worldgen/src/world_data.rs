@@ -11,38 +11,135 @@ use coords::{Coord, Direction, MapBounds};
 
 use crate::Field;
 
-// ------------- Biome classification -------------
+// ------------- Re-export content handle type -------------
 
-/// Land biome assigned from temperature and moisture.
+/// Re-export the content `Handle` type for use throughout worldgen.
+pub use content::Handle;
+
+// ------------- Biome registry types -------------
+
+/// A dense runtime handle for a biome.
 ///
-/// Water, coast, lake, and mountain tiles receive no biome assignment;
-/// those are terrain or hydrology states owned by earlier stages.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-)]
-pub enum Biome {
-    /// Hot and wet forest biome.
-    TropicalRainforest,
-    /// Moderate-temperature forest biome.
-    TemperateForest,
-    /// Cold taiga forest biome.
-    BorealForest,
-    /// Open grassland or savanna biome.
-    Grassland,
-    /// Low-moisture biome at any temperature.
-    Desert,
-    /// Cold sparse-ground biome.
-    Tundra,
+/// Assigned alphabetically by the [`BiomeRegistry`]. Use
+/// [`BiomeRegistry::id_of`] to retrieve the corresponding string ID.
+/// Never serialize handles — only string IDs are stable across versions.
+pub type BiomeHandle = content::Handle;
+
+/// A dense runtime handle for a resource.
+///
+/// Assigned alphabetically by the [`ResourceRegistry`]. Use
+/// [`ResourceRegistry::id_of`] to retrieve the corresponding string ID.
+/// Never serialize handles — only string IDs are stable across versions.
+pub type ResourceHandle = content::Handle;
+
+/// Registry of all known biome kinds, with associated properties.
+///
+/// Biomes are identified by stable `snake_case` string IDs (e.g.
+/// `"grassland"`, `"tundra"`). At load time the registry assigns
+/// each ID a dense handle index by alphabetical ordering.
+///
+/// # Property arrays
+///
+/// `is_forest` is indexed by `handle.index()`. This layout ensures
+/// hot-path property reads are a single array lookup with no pointer
+/// indirection.
+#[derive(Debug, Clone)]
+pub struct BiomeRegistry {
+    /// Underlying string-to-handle mapping.
+    pub inner: content::Registry,
+    /// Per-handle forest flag, indexed by `handle.index()`.
+    ///
+    /// `true` if the biome supports forest-density output.
+    pub is_forest: Vec<bool>,
 }
 
-impl Biome {
-    /// Returns `true` if this biome supports forest-density output.
+impl BiomeRegistry {
+    /// Resolves a string biome ID to a handle.
+    ///
+    /// Returns `None` if the ID is not in the registry.
     #[must_use]
-    pub const fn is_forest(self) -> bool {
-        matches!(
-            self,
-            Self::TropicalRainforest | Self::TemperateForest | Self::BorealForest
-        )
+    pub fn resolve(&self, id: &str) -> Option<BiomeHandle> {
+        self.inner.resolve(id)
+    }
+
+    /// Returns the string ID for a biome handle.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `handle` was not produced by this registry.
+    #[must_use]
+    pub fn id_of(&self, handle: BiomeHandle) -> &str {
+        self.inner.id_of(handle)
+    }
+
+    /// Returns `true` if the biome identified by `handle` is a forest
+    /// biome that supports forest-density output.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `handle.index()` is out of bounds for this registry.
+    #[must_use]
+    pub fn is_forest_biome(&self, handle: BiomeHandle) -> bool {
+        self.is_forest[handle.index()]
+    }
+
+    /// Returns an iterator over all biome handles in ascending index order.
+    pub fn all_handles(&self) -> impl Iterator<Item = BiomeHandle> {
+        self.inner.handles()
+    }
+}
+
+/// Registry of all known resource kinds, with associated properties.
+///
+/// Resources are identified by stable `snake_case` string IDs (e.g.
+/// `"iron"`, `"horses"`). At load time the registry assigns each ID a
+/// dense handle index by alphabetical ordering.
+///
+/// # Property arrays
+///
+/// `category` is indexed by `handle.index()`. This layout ensures
+/// hot-path property reads are a single array lookup with no pointer
+/// indirection.
+#[derive(Debug, Clone)]
+pub struct ResourceRegistry {
+    /// Underlying string-to-handle mapping.
+    pub inner: content::Registry,
+    /// Per-handle category, indexed by `handle.index()`.
+    pub category: Vec<ResourceCategory>,
+}
+
+impl ResourceRegistry {
+    /// Resolves a string resource ID to a handle.
+    ///
+    /// Returns `None` if the ID is not in the registry.
+    #[must_use]
+    pub fn resolve(&self, id: &str) -> Option<ResourceHandle> {
+        self.inner.resolve(id)
+    }
+
+    /// Returns the string ID for a resource handle.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `handle` was not produced by this registry.
+    #[must_use]
+    pub fn id_of(&self, handle: ResourceHandle) -> &str {
+        self.inner.id_of(handle)
+    }
+
+    /// Returns the placement category for the resource identified by `handle`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `handle.index()` is out of bounds for this registry.
+    #[must_use]
+    pub fn category_of(&self, handle: ResourceHandle) -> ResourceCategory {
+        self.category[handle.index()]
+    }
+
+    /// Returns an iterator over all resource handles in ascending index order.
+    pub fn all_handles(&self) -> impl Iterator<Item = ResourceHandle> {
+        self.inner.handles()
     }
 }
 
@@ -115,6 +212,12 @@ pub enum PlateType {
 /// Variants are intentionally coarse geological categories rather than
 /// specific resources, so the mapping from character to resource can be
 /// tuned independently of generation.
+///
+/// `MineralCharacter` is retained as an enum rather than a registry-based
+/// content kind because it is a generation mechanism, not moddable content:
+/// no mod would add a new mineral character. The mapping from character to
+/// resource is content data (RON config); only the generation token stays
+/// closed. See ADR-0022.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
 )]
@@ -143,46 +246,28 @@ impl MineralCharacter {
     ];
 }
 
-// ------------- Resource classification -------------
+// ------------- Resource category -------------
 
-/// Resource identifier stored in the final resource layer.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-)]
-pub enum ResourceId {
-    /// Strategic metal resource.
-    Iron,
-    /// Strategic mounted-unit resource.
-    Horses,
-    /// Luxury precious-metal resource.
-    Gold,
-    /// Luxury gemstone resource.
-    Gems,
-    /// Luxury tropical crop resource.
-    Spices,
-    /// Luxury temperate crop resource.
-    Wine,
-    /// Bonus farm resource.
-    Wheat,
-    /// Bonus water-food resource.
-    Fish,
-    /// Bonus production resource.
-    Stone,
-}
-
-impl ResourceId {
-    /// All resources in stable definition order.
-    pub const ALL: &'static [Self] = &[
-        Self::Iron,
-        Self::Horses,
-        Self::Gold,
-        Self::Gems,
-        Self::Spices,
-        Self::Wine,
-        Self::Wheat,
-        Self::Fish,
-        Self::Stone,
-    ];
+/// Resource placement category.
+///
+/// Determines the placement algorithm used for a resource:
+/// - [`Self::Strategic`] uses baseline + plate-weighted scatter.
+/// - [`Self::Luxury`] uses clustered plate-weighted deposits.
+/// - [`Self::Bonus`] uses uniform biome/terrain scatter.
+///
+/// `ResourceCategory` is retained as an enum rather than a content kind
+/// because it is a placement mechanism, not open content: the set of
+/// placement algorithms is closed. Resources themselves are open content
+/// (new resources can be added); the category enum is an implementation
+/// detail of the placement algorithm. See ADR-0022.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ResourceCategory {
+    /// Mixed baseline plus plate-weighted scatter.
+    Strategic,
+    /// Clustered plate-weighted deposits.
+    Luxury,
+    /// Uniform biome/terrain scatter.
+    Bonus,
 }
 
 /// A 2D motion vector representing the notional drift of a tectonic
@@ -449,7 +534,7 @@ pub struct BiomeData {
     /// Per-land-tile biome classification.
     ///
     /// `None` for ocean, coast, lakes, and mountain-level tiles.
-    pub biome: Field<Option<Biome>>,
+    pub biome: Field<Option<BiomeHandle>>,
 
     /// Rendering hint for forest coverage density.
     ///
@@ -476,9 +561,9 @@ impl BiomeData {
 pub struct ResourceData {
     /// Per-tile resource assignment.
     ///
-    /// `None` means the tile has no placed resource. `Some(id)` means
+    /// `None` means the tile has no placed resource. `Some(handle)` means
     /// exactly one resource occupies the tile; resources do not stack.
-    pub resource: Field<Option<ResourceId>>,
+    pub resource: Field<Option<ResourceHandle>>,
 }
 
 impl ResourceData {
@@ -513,6 +598,12 @@ pub struct WorldData {
     /// stored elsewhere in this struct.
     pub bounds: MapBounds,
 
+    /// Registry of all known biome kinds with their properties.
+    pub biome_registry: BiomeRegistry,
+
+    /// Registry of all known resource kinds with their properties.
+    pub resource_registry: ResourceRegistry,
+
     /// Output of the tectonics stage (design §1.9).
     pub tectonics: TectonicData,
 
@@ -530,12 +621,18 @@ pub struct WorldData {
 }
 
 impl WorldData {
-    /// Constructs a [`WorldData`] with the given bounds and empty
-    /// sub-structures.
+    /// Constructs a [`WorldData`] with the given bounds, registries, and
+    /// empty sub-structures.
     #[must_use]
-    pub fn new(bounds: MapBounds) -> Self {
+    pub fn new(
+        bounds: MapBounds,
+        biome_registry: BiomeRegistry,
+        resource_registry: ResourceRegistry,
+    ) -> Self {
         Self {
             bounds,
+            biome_registry,
+            resource_registry,
             tectonics: TectonicData::empty(bounds),
             climate: ClimateData::empty(bounds),
             hydrology: HydrologyData::empty(bounds),
