@@ -33,11 +33,21 @@ A Cargo workspace with strict crate separation:
 
 - **`crates/coords`** — Pure Rust, no dependencies. Wrap-aware hexagonal coordinate math. Axial (`q`, `r`) representation; `q` wraps east-west toroidally, `r` is bounded north-south. `Coord` carries no map context — wrap/bounds operations require a `MapBounds` passed explicitly. Everything spatial in `worldgen` and `game` is built on this.
 
-- **`crates/worldgen`** — No Bevy dependency. Procedural generation pipeline: tectonics → climate → hydrology → biomes → resources → starting positions. Seeded deterministic RNG (`rand_chacha::ChaCha8Rng`); each pipeline stage derives a sub-RNG from a master with a fixed stage-identifier salt so tuning one stage doesn't shift others. Output is `WorldData`, consumed by the `game` crate as a Bevy resource.
+- **`crates/worldgen`** — No Bevy dependency. Procedural generation pipeline: tectonics → climate → hydrology → biomes → resources. Starting positions are planned as Stage 3.6 but are not currently part of `generate_world`. Seeded deterministic RNG (`rand_chacha::ChaCha8Rng`); each pipeline stage derives a sub-RNG from a master with a fixed stage-identifier salt so tuning one stage doesn't shift others. Output is `WorldData`, consumed by the `game` crate as a Bevy resource.
 
 - **`crates/game`** — Bevy application. Feature-per-plugin structure. Receives `WorldData` from `worldgen` before Bevy initialises rendering. All game-state mutations flow through the command layer (`Input → Command → CommandProcessor`) — systems never mutate state directly (multiplayer determinism requirement).
 
 - **`tools/mapdump`** — CLI binary. Takes a seed + parameter overrides, calls `worldgen`, writes per-stage PNG debug images. Primary tuning tool for generation work; must run without Bevy.
+
+## Session startup
+
+Before starting work, read the context for your task type:
+
+- **Worldgen pipeline work or a new stage**: read `documents/crates/worldgen/api.md`, then check `documents/planning/implementation-plan.md` for the current stage.
+- **Parameter tuning / mapdump / maptest**: read `documents/crates/worldgen/parameters/<stage>.md` for the relevant stage.
+- **Game / Bevy rendering**: read `documents/crates/game/api.md`.
+- **coords or det_rng work**: read `documents/crates/coords/api.md`.
+- **Any task**: check `documents/planning/implementation-plan.md` (the `## Status` footer) for the current stage.
 
 ## Lint configuration
 
@@ -76,6 +86,8 @@ Git hooks in `.githooks/` (installed by setup script):
 
 ## Implementation status
 
-The project is in **Stage 0** (foundations). `coords` is substantially implemented with full tests. `worldgen` and `game` are stubs. `mapdump` is a stub. See `documents/planning/implementation-plan.md` for the full staged plan (Stages 0–3+ covering worldgen infrastructure, generation pipeline, and game scaffolding).
+See `documents/planning/implementation-plan.md` — the `## Status` footer tracks the current stage; inline completion notes mark each finished step.
 
-Design decisions are in `documents/design/design-decisions.md`. Architecture decisions are in `documents/adr/`.
+Available tools: `mapdump` (PNG debug dumps per stage), `maptest` (multi-seed sweeps with `run`/`sweep` subcommands), `maptune` (GUI param tuning), `mapbench` (rendering benchmarks), `maprender` (render perf gates).
+
+Design decisions are split by domain in `documents/design/`: `overview.md` (pillars + cross-cutting), `worldgen.md`, `cities.md`, `combat.md`, `known-issues.md` (open topics + risks). Architecture decisions are in `documents/adr/`.

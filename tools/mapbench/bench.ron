@@ -1,0 +1,9 @@
+// Default benchmark configuration.
+// All fields are optional; missing fields fall back to the BenchConfig::default() values.
+BenchConfig(
+    seeds: [1, 2, 3, 4],
+    sizes: [Small, Standard, Medium, Large, Huge],
+    renderer: Terrain3d,
+    measurement_secs: 30,
+    output_dir: "bench-results",
+)

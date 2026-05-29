@@ -1,0 +1,19 @@
+[package]
+name    = "mapbench"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+game               = { path = "../../crates/game" }
+worldgen           = { workspace = true }
+bevy               = { workspace = true }
+anyhow             = { workspace = true }
+clap               = { workspace = true }
+ron                = { workspace = true }
+serde              = { workspace = true }
+serde_json         = "1"
+tracing            = { workspace = true }
+tracing-subscriber = { workspace = true }
