@@ -44,6 +44,12 @@ in the game Pandora: First Contact. Placement would have to follow some rules, l
 Additionally some techs depend on each other. You cannot discover battleships before you have oil. Stationary tech tree is simpler, but a
 semi-random one is more interesting.
 
+### Technologies
+
+#### Ancient Era
+
+
+
 ---
 
 ## Culture
@@ -105,20 +111,23 @@ exploring the surroundings and securing borders.
 - science
 
 #### Units
-- Warrior (meelee)
-- Archer (ranged)
+- Warrior (meelee): earliest meelee unit. cheap to produce.
+- Archer (ranged): Early ranged
 - Worker
 - Scout
+- Spearman (meelee): early meelee unit. slightly stronger then warrior and cheap. Carries into classical era as a cheap, mass produced, expendable unit.
 
 #### Districts
 - City Center
 - Defensive
 - neighborhood
+- economic
 
 #### Buildings
 - City hall (city center)
 - watchtower (defensive)
 - house (neighborhood)
+- trade post (economic)
 
 #### outpost specializations
 - farming
@@ -136,7 +145,6 @@ focus on science and culture. this should also be an expansion era, where border
 -policies
 
 #### Units
-- spearmen (anti cavalry)
 - swordsman (meelee)
 - ballista (siege)
 
@@ -150,6 +158,9 @@ focus on science and culture. this should also be an expansion era, where border
 - academy (science) - provides science
 - Smith (production) - boosts city production
 - walls (defensive) - must be destroyed before moving past
+
+#### Outpost specializations
+- Trade Hub
 
 ---
 
