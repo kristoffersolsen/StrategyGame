@@ -1,5 +1,6 @@
 use bevy::{asset::AssetPlugin, log::LogPlugin, prelude::*};
 use game::rendering::{RenderStartupConfig, RenderingPlugin};
+use game::sim::{SimPlugin, SimStartupConfig};
 use worldgen::{BasicParams, WorldParams};
 
 use crate::{collector::BenchPlugin, config::BenchCase};
@@ -9,7 +10,7 @@ use crate::{collector::BenchPlugin, config::BenchCase};
 /// The app runs to completion: when the measurement window closes, the
 /// `bench_update` system prints a JSON `CaseResult` to stdout and exits.
 pub(crate) fn run_single_case(case: BenchCase) {
-    let config = RenderStartupConfig {
+    let sim_config = SimStartupConfig {
         world_params: WorldParams {
             seed: case.seed,
             basic: BasicParams {
@@ -18,11 +19,14 @@ pub(crate) fn run_single_case(case: BenchCase) {
             },
             ..WorldParams::default()
         },
+    };
+    let render_config = RenderStartupConfig {
         terrain_renderer: case.renderer.into(),
     };
 
     App::new()
-        .insert_resource(config)
+        .insert_resource(sim_config)
+        .insert_resource(render_config)
         .add_plugins(
             DefaultPlugins
                 .set(AssetPlugin {
@@ -32,6 +36,7 @@ pub(crate) fn run_single_case(case: BenchCase) {
                 .build()
                 .disable::<LogPlugin>(),
         )
+        .add_plugins(SimPlugin)
         .add_plugins(RenderingPlugin)
         .add_plugins(BenchPlugin { case })
         .run();

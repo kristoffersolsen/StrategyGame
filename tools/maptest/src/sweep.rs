@@ -11,8 +11,8 @@ use clap::Parser;
 use rayon::prelude::*;
 use tracing::info;
 use worldgen::{
-    BasicParams, BiomeParams, ResourceParams, TectonicsParams, TuningParams, WorldParams,
-    generate_world,
+    BasicParams, BiomeParams, ResourceParams, StartingPositionParams, TectonicsParams,
+    TuningParams, WorldParams, generate_world,
 };
 
 use crate::output;
@@ -257,6 +257,25 @@ fn set_resource_param(resources: &mut ResourceParams, name: &str, value: f64) ->
     true
 }
 
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss
+)]
+fn set_starting_position_param(sp: &mut StartingPositionParams, name: &str, value: f64) -> bool {
+    match name {
+        "neighborhood_radius" => sp.neighborhood_radius = value.round() as u32,
+        "adequacy_floor" => sp.adequacy_floor = value as f32,
+        "min_spacing" => sp.min_spacing = value.round() as u32,
+        "freshwater_food_bonus" => sp.freshwater_food_bonus = value as f32,
+        "hilly_production_bonus" => sp.hilly_production_bonus = value as f32,
+        "food_weight" => sp.food_weight = value as f32,
+        "production_weight" => sp.production_weight = value as f32,
+        _ => return false,
+    }
+    true
+}
+
 /// Sets a single scalar field of `tuning` by its `snake_case` name.
 ///
 /// Vec and bool fields cannot be swept as scalars; provide them via a
@@ -279,6 +298,9 @@ pub(crate) fn set_param(tuning: &mut TuningParams, name: &str, value: f64) -> Re
         return Ok(());
     }
     if set_resource_param(&mut tuning.resources, name, value) {
+        return Ok(());
+    }
+    if set_starting_position_param(&mut tuning.starting_positions, name, value) {
         return Ok(());
     }
 

@@ -14,12 +14,12 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use tracing::info;
 use worldgen::{
-    Biome, BiomeData, BoundaryType, ClimateData, Direction, Field, HydrologyData, ResourceData,
-    ResourceId, RiverSize, TectonicData, WorldData,
+    BiomeData, BoundaryType, ClimateData, Direction, Field, HydrologyData, ResourceData, RiverSize,
+    StartingPositionData, TectonicData, WorldData,
     debug_viz::{
         BiomeCmap, BoundaryCmap, Categorical, Colormap, Grayscale, HeightLevelCmap, ResourceCmap,
-        Viridis, dump_field_hex, dump_field_pixels, dump_field_with_seed_overlay,
-        dump_rgb_field_hex,
+        Viridis, biome_handle_to_f32, dump_field_hex, dump_field_pixels,
+        dump_field_with_seed_overlay, dump_rgb_field_hex, resource_handle_to_f32,
     },
 };
 
@@ -57,6 +57,8 @@ pub(crate) const SUBDIR_RESOURCE_WINE: &str = "resource_wine";
 pub(crate) const SUBDIR_RESOURCE_WHEAT: &str = "resource_wheat";
 pub(crate) const SUBDIR_RESOURCE_FISH: &str = "resource_fish";
 pub(crate) const SUBDIR_RESOURCE_STONE: &str = "resource_stone";
+pub(crate) const SUBDIR_VIABILITY: &str = "viability";
+pub(crate) const SUBDIR_START_POSITIONS: &str = "start_positions";
 
 pub(crate) const ALL_SUBDIRS: &[&str] = &[
     SUBDIR_SEEDS,
@@ -91,6 +93,8 @@ pub(crate) const ALL_SUBDIRS: &[&str] = &[
     SUBDIR_RESOURCE_WHEAT,
     SUBDIR_RESOURCE_FISH,
     SUBDIR_RESOURCE_STONE,
+    SUBDIR_VIABILITY,
+    SUBDIR_START_POSITIONS,
 ];
 
 // ------------- Directory preparation -------------
@@ -163,13 +167,22 @@ pub(crate) fn write_world_outputs(
         hex_size,
         land_level_count,
     )?;
-    write_biomes(biomes, base_dir, label, hex_size)?;
+    write_biomes(biomes, base_dir, label, hex_size, world)?;
     write_forest_density(biomes, base_dir, label)?;
-    write_resources(resources, base_dir, label, hex_size)?;
+    write_resources(resources, base_dir, label, hex_size, world)?;
+    write_viability(&world.starting_positions, base_dir, label, hex_size)?;
+    write_start_positions(
+        &world.starting_positions,
+        tectonics,
+        base_dir,
+        label,
+        land_level_count,
+    )?;
     log_climate_stats(tectonics, climate);
     log_hydrology_stats(hydrology);
-    log_biome_stats(biomes);
-    log_resource_stats(resources);
+    log_biome_stats(biomes, world);
+    log_resource_stats(resources, world);
+    log_starting_position_stats(&world.starting_positions, world);
     Ok(())
 }
 
@@ -632,9 +645,16 @@ fn river_size_to_f32(river_size: Option<RiverSize>) -> f32 {
 
 // ------------- Per-output helpers (biomes) -------------
 
-fn write_biomes(biomes: &BiomeData, base_dir: &Path, label: &str, hex_size: u32) -> Result<()> {
+fn write_biomes(
+    biomes: &BiomeData,
+    base_dir: &Path,
+    label: &str,
+    hex_size: u32,
+    world: &WorldData,
+) -> Result<()> {
     let path = base_dir.join(SUBDIR_BIOMES).join(format!("{label}.png"));
-    dump_field_hex(&biomes.biome, &path, biome_to_f32, &BiomeCmap, hex_size)
+    let cmap = BiomeCmap::new(&world.biome_registry);
+    dump_field_hex(&biomes.biome, &path, biome_handle_to_f32, &cmap, hex_size)
         .with_context(|| format!("failed to write {}", path.display()))
 }
 
@@ -646,18 +666,6 @@ fn write_forest_density(biomes: &BiomeData, base_dir: &Path, label: &str) -> Res
         .with_context(|| format!("failed to write {}", path.display()))
 }
 
-fn biome_to_f32(biome: Option<Biome>) -> f32 {
-    match biome {
-        None => 0.0,
-        Some(Biome::TropicalRainforest) => 1.0,
-        Some(Biome::TemperateForest) => 2.0,
-        Some(Biome::BorealForest) => 3.0,
-        Some(Biome::Grassland) => 4.0,
-        Some(Biome::Desert) => 5.0,
-        Some(Biome::Tundra) => 6.0,
-    }
-}
-
 // ------------- Per-output helpers (resources) -------------
 
 fn write_resources(
@@ -665,26 +673,27 @@ fn write_resources(
     base_dir: &Path,
     label: &str,
     hex_size: u32,
+    world: &WorldData,
 ) -> Result<()> {
     let combined_path = base_dir.join(SUBDIR_RESOURCES).join(format!("{label}.png"));
+    let cmap = ResourceCmap::new(&world.resource_registry);
     dump_field_hex(
         &resources.resource,
         &combined_path,
-        resource_to_f32,
-        &ResourceCmap,
+        resource_handle_to_f32,
+        &cmap,
         hex_size,
     )
     .with_context(|| format!("failed to write {}", combined_path.display()))?;
 
-    for &resource in ResourceId::ALL {
-        let path = base_dir
-            .join(resource_subdir(resource))
-            .join(format!("{label}.png"));
+    for (handle, id) in world.resource_registry.inner.iter() {
+        let subdir = base_dir.join(resource_subdir_for_id(id));
+        let path = subdir.join(format!("{label}.png"));
         dump_field_pixels(
             &resources.resource,
             &path,
             |tile| {
-                if tile == Some(resource) { 1.0 } else { 0.0 }
+                if tile == Some(handle) { 1.0 } else { 0.0 }
             },
             &Grayscale,
         )
@@ -693,35 +702,111 @@ fn write_resources(
     Ok(())
 }
 
-fn resource_to_f32(resource: Option<ResourceId>) -> f32 {
-    match resource {
-        None => 0.0,
-        Some(ResourceId::Iron) => 1.0,
-        Some(ResourceId::Horses) => 2.0,
-        Some(ResourceId::Gold) => 3.0,
-        Some(ResourceId::Gems) => 4.0,
-        Some(ResourceId::Spices) => 5.0,
-        Some(ResourceId::Wine) => 6.0,
-        Some(ResourceId::Wheat) => 7.0,
-        Some(ResourceId::Fish) => 8.0,
-        Some(ResourceId::Stone) => 9.0,
+fn resource_subdir_for_id(id: &str) -> &str {
+    // The string ID is the subdirectory name — stable across renames.
+    match id {
+        "iron" => SUBDIR_RESOURCE_IRON,
+        "horses" => SUBDIR_RESOURCE_HORSES,
+        "gold" => SUBDIR_RESOURCE_GOLD,
+        "gems" => SUBDIR_RESOURCE_GEMS,
+        "spices" => SUBDIR_RESOURCE_SPICES,
+        "wine" => SUBDIR_RESOURCE_WINE,
+        "wheat" => SUBDIR_RESOURCE_WHEAT,
+        "fish" => SUBDIR_RESOURCE_FISH,
+        "stone" => SUBDIR_RESOURCE_STONE,
+        _ => SUBDIR_RESOURCES, // fallback for unknown resources
     }
 }
 
-fn resource_subdir(resource: ResourceId) -> &'static str {
-    match resource {
-        ResourceId::Iron => SUBDIR_RESOURCE_IRON,
-        ResourceId::Horses => SUBDIR_RESOURCE_HORSES,
-        ResourceId::Gold => SUBDIR_RESOURCE_GOLD,
-        ResourceId::Gems => SUBDIR_RESOURCE_GEMS,
-        ResourceId::Spices => SUBDIR_RESOURCE_SPICES,
-        ResourceId::Wine => SUBDIR_RESOURCE_WINE,
-        ResourceId::Wheat => SUBDIR_RESOURCE_WHEAT,
-        ResourceId::Fish => SUBDIR_RESOURCE_FISH,
-        ResourceId::Stone => SUBDIR_RESOURCE_STONE,
+// ------------- Per-output helpers (starting positions) -------------
+
+fn write_viability(
+    starting_positions: &StartingPositionData,
+    base_dir: &Path,
+    label: &str,
+    hex_size: u32,
+) -> Result<()> {
+    let max_viability = starting_positions
+        .viability
+        .iter()
+        .copied()
+        .fold(0.0_f32, f32::max);
+
+    let to_f32 = move |v: f32| {
+        if max_viability > 0.0 {
+            v / max_viability
+        } else {
+            0.0
+        }
+    };
+
+    let path = base_dir.join(SUBDIR_VIABILITY).join(format!("{label}.png"));
+    dump_field_hex(
+        &starting_positions.viability,
+        &path,
+        to_f32,
+        &Viridis,
+        hex_size,
+    )
+    .with_context(|| format!("failed to write {}", path.display()))
+}
+
+fn write_start_positions(
+    starting_positions: &StartingPositionData,
+    tectonics: &TectonicData,
+    base_dir: &Path,
+    label: &str,
+    land_level_count: u8,
+) -> Result<()> {
+    let path = base_dir
+        .join(SUBDIR_START_POSITIONS)
+        .join(format!("{label}.png"));
+    dump_field_with_seed_overlay(
+        &tectonics.height_level,
+        &starting_positions.start_positions,
+        &path,
+        |&v| f32::from(v),
+        &HeightLevelCmap { land_level_count },
+        START_POSITION_COLOR,
+    )
+    .with_context(|| format!("failed to write {}", path.display()))
+}
+
+// Tile counts fit comfortably in f32 (max ~2 million for a huge map).
+#[allow(clippy::cast_precision_loss)]
+fn log_starting_position_stats(starting_positions: &StartingPositionData, world: &WorldData) {
+    let count = starting_positions.start_positions.len();
+    let max_viability = starting_positions
+        .viability
+        .iter()
+        .copied()
+        .fold(0.0_f32, f32::max);
+    let eligible_count = starting_positions
+        .viability
+        .iter()
+        .filter(|&&v| v > 0.0)
+        .count();
+
+    info!(
+        count,
+        max_viability, eligible_count, "starting position stats"
+    );
+
+    for (i, &coord) in starting_positions.start_positions.iter().enumerate() {
+        let biome_id = world.biomes.biome[coord].map_or("none", |h| world.biome_registry.id_of(h));
+        let viability = starting_positions.viability[coord];
+        info!(
+            player = i,
+            q = coord.q,
+            r = coord.r,
+            biome = %biome_id,
+            viability,
+            "start position"
+        );
     }
 }
 
+const START_POSITION_COLOR: [u8; 3] = [255, 255, 0]; // bright yellow
 const LAKE_COLOR: [u8; 3] = [0, 170, 170];
 const RIVER_COLOR: [u8; 3] = [255, 105, 180];
 const MAJOR_RIVER_COLOR: [u8; 3] = [130, 70, 210];
@@ -830,75 +915,38 @@ fn log_hydrology_stats(hydrology: &HydrologyData) {
     );
 }
 
-fn log_biome_stats(biomes: &BiomeData) {
-    let mut tropical_rainforest_count = 0_usize;
-    let mut temperate_forest_count = 0_usize;
-    let mut boreal_forest_count = 0_usize;
-    let mut grassland_count = 0_usize;
-    let mut desert_count = 0_usize;
-    let mut tundra_count = 0_usize;
+fn log_biome_stats(biomes: &BiomeData, world: &WorldData) {
+    let mut counts = std::collections::BTreeMap::new();
     let mut unassigned_count = 0_usize;
 
     for &biome in biomes.biome.as_slice() {
         match biome {
             None => unassigned_count += 1,
-            Some(Biome::TropicalRainforest) => tropical_rainforest_count += 1,
-            Some(Biome::TemperateForest) => temperate_forest_count += 1,
-            Some(Biome::BorealForest) => boreal_forest_count += 1,
-            Some(Biome::Grassland) => grassland_count += 1,
-            Some(Biome::Desert) => desert_count += 1,
-            Some(Biome::Tundra) => tundra_count += 1,
+            Some(handle) => {
+                let id = world.biome_registry.id_of(handle);
+                *counts.entry(id.to_owned()).or_insert(0_usize) += 1;
+            }
         }
     }
 
-    info!(
-        tropical_rainforest_count,
-        temperate_forest_count,
-        boreal_forest_count,
-        grassland_count,
-        desert_count,
-        tundra_count,
-        unassigned_count,
-        "biome stats"
-    );
+    for (id, count) in &counts {
+        info!(biome = %id, count, "biome count");
+    }
+    info!(unassigned_count, "biome stats");
 }
 
-fn log_resource_stats(resources: &ResourceData) {
-    let mut iron_count = 0_usize;
-    let mut horses_count = 0_usize;
-    let mut gold_count = 0_usize;
-    let mut gems_count = 0_usize;
-    let mut spices_count = 0_usize;
-    let mut wine_count = 0_usize;
-    let mut wheat_count = 0_usize;
-    let mut fish_count = 0_usize;
-    let mut stone_count = 0_usize;
+fn log_resource_stats(resources: &ResourceData, world: &WorldData) {
+    let mut counts = std::collections::BTreeMap::new();
 
     for &resource in resources.resource.as_slice() {
-        match resource {
-            None => {}
-            Some(ResourceId::Iron) => iron_count += 1,
-            Some(ResourceId::Horses) => horses_count += 1,
-            Some(ResourceId::Gold) => gold_count += 1,
-            Some(ResourceId::Gems) => gems_count += 1,
-            Some(ResourceId::Spices) => spices_count += 1,
-            Some(ResourceId::Wine) => wine_count += 1,
-            Some(ResourceId::Wheat) => wheat_count += 1,
-            Some(ResourceId::Fish) => fish_count += 1,
-            Some(ResourceId::Stone) => stone_count += 1,
+        if let Some(handle) = resource {
+            let id = world.resource_registry.id_of(handle);
+            *counts.entry(id.to_owned()).or_insert(0_usize) += 1;
         }
     }
 
-    info!(
-        iron_count,
-        horses_count,
-        gold_count,
-        gems_count,
-        spices_count,
-        wine_count,
-        wheat_count,
-        fish_count,
-        stone_count,
-        "resource stats"
-    );
+    for (id, count) in &counts {
+        info!(resource = %id, count, "resource count");
+    }
+    info!("resource stats logged");
 }

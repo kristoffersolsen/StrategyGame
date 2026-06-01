@@ -5,10 +5,11 @@
 
 use image::RgbImage;
 use worldgen::{
-    Biome, BoundaryType, Direction, Field, RiverSize,
+    BoundaryType, Direction, Field, RiverSize,
     debug_viz::{
         BiomeCmap, BoundaryCmap, Categorical, Colormap, Grayscale, HeightLevelCmap, ResourceCmap,
-        Viridis, render_field_hex, render_field_pixels, render_rgb_field_hex,
+        Viridis, biome_handle_to_f32, render_field_hex, render_field_pixels, render_rgb_field_hex,
+        resource_handle_to_f32,
     },
 };
 
@@ -367,7 +368,13 @@ fn render_hydrology_overlay(w: &WorldOutput) -> RgbImage {
 // ------------- Render functions: biomes -------------
 
 fn render_biomes(w: &WorldOutput) -> RgbImage {
-    render_field_hex(&w.world.biomes.biome, biome_to_f32, &BiomeCmap, w.hex_size)
+    let cmap = BiomeCmap::new(&w.world.biome_registry);
+    render_field_hex(
+        &w.world.biomes.biome,
+        biome_handle_to_f32,
+        &cmap,
+        w.hex_size,
+    )
 }
 
 fn render_forest_density(w: &WorldOutput) -> RgbImage {
@@ -377,10 +384,11 @@ fn render_forest_density(w: &WorldOutput) -> RgbImage {
 // ------------- Render functions: resources -------------
 
 fn render_resources(w: &WorldOutput) -> RgbImage {
+    let cmap = ResourceCmap::new(&w.world.resource_registry);
     render_field_hex(
         &w.world.resources.resource,
-        resource_to_f32,
-        &ResourceCmap,
+        resource_handle_to_f32,
+        &cmap,
         w.hex_size,
     )
 }
@@ -405,32 +413,5 @@ fn river_size_to_f32(river_size: Option<RiverSize>) -> f32 {
         Some(RiverSize::Creek) => 1.0,
         Some(RiverSize::River) => 2.0,
         Some(RiverSize::MajorRiver) => 3.0,
-    }
-}
-
-fn biome_to_f32(biome: Option<Biome>) -> f32 {
-    match biome {
-        None => 0.0,
-        Some(Biome::TropicalRainforest) => 1.0,
-        Some(Biome::TemperateForest) => 2.0,
-        Some(Biome::BorealForest) => 3.0,
-        Some(Biome::Grassland) => 4.0,
-        Some(Biome::Desert) => 5.0,
-        Some(Biome::Tundra) => 6.0,
-    }
-}
-
-fn resource_to_f32(resource: Option<worldgen::ResourceId>) -> f32 {
-    match resource {
-        None => 0.0,
-        Some(worldgen::ResourceId::Iron) => 1.0,
-        Some(worldgen::ResourceId::Horses) => 2.0,
-        Some(worldgen::ResourceId::Gold) => 3.0,
-        Some(worldgen::ResourceId::Gems) => 4.0,
-        Some(worldgen::ResourceId::Spices) => 5.0,
-        Some(worldgen::ResourceId::Wine) => 6.0,
-        Some(worldgen::ResourceId::Wheat) => 7.0,
-        Some(worldgen::ResourceId::Fish) => 8.0,
-        Some(worldgen::ResourceId::Stone) => 9.0,
     }
 }

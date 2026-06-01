@@ -1,0 +1,50 @@
+// assets/worldgen/yield_table.ron
+//
+// Tile yield base table for Stage 4 (design §yield-system ADR).
+//
+// A tile's total yield is: biome_yield + feature_yields + improvement_transform.
+// This file defines the additive base values. The improvement transform is
+// applied by the command processor (Stage 8+) — it is identity here.
+//
+// Yield components:
+//   food       — drives population and city growth
+//   production — drives building and unit construction
+//   gold       — drives treasury income and trade
+//
+// Biome string IDs must match the keys in assets/worldgen/biome_table.ron
+// exactly. Unknown IDs cause a startup error (fail-fast at load time).
+//
+// Feature modifiers are additive:
+//   hilly_yield      — applied when tectonics.is_hilly is true
+//   floodplain_yield — applied when hydrology.is_floodplain is true
+//   river_yield      — applied when the tile carries a river channel
+//
+// Values are non-negative u32. The additive model keeps all components ≥ 0.
+//
+// Balance rationale (rough v1 numbers — subject to tuning in Stage 8+):
+//   Grassland:           high food (breadbasket), minor gold (trade routes)
+//   Temperate/Tropical:  forest biomes favour production over food
+//   Desert:              scarce food, marginal production (stone/minerals)
+//   Tundra:              minimal output; survivable but not desirable
+//   Hills (+1 prod):     classic Civ pattern — rough terrain rewards industry
+//   Floodplain (+1 food):fertile inundation strip (Nile, Mesopotamia)
+//   River (+1 gold):     trade route bonus (rivers are highways)
+(
+    biome_yields: {
+        "boreal_forest":       ( food: 1, production: 2, gold: 0 ),
+        "desert":              ( food: 0, production: 1, gold: 0 ),
+        "grassland":           ( food: 2, production: 0, gold: 1 ),
+        "temperate_forest":    ( food: 1, production: 2, gold: 0 ),
+        "tropical_rainforest": ( food: 2, production: 1, gold: 0 ),
+        "tundra":              ( food: 1, production: 0, gold: 0 ),
+    },
+
+    // Applied when the tile is flagged as hilly (tectonics.is_hilly).
+    hilly_yield:      ( food: 0, production: 1, gold: 0 ),
+
+    // Applied when the tile is a floodplain (hydrology.is_floodplain).
+    floodplain_yield: ( food: 1, production: 0, gold: 0 ),
+
+    // Applied when the tile carries a river channel (hydrology.river_size).
+    river_yield:      ( food: 0, production: 0, gold: 1 ),
+)

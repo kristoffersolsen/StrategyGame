@@ -65,6 +65,12 @@
 //!
 //! - `35_01_resources_hex.png` — categorical combined resource map.
 //! - `35_02_resource_<name>_px.png` — binary overlay for each resource.
+//!
+//! ## Stage 3.6 — Starting positions
+//!
+//! - `36_01_viability_hex.png` — neighbourhood yield sum (Viridis).
+//! - `36_02_start_positions_px.png` — height level with selected start
+//!   positions marked in yellow.
 
 use std::path::Path;
 use std::path::PathBuf;
@@ -73,12 +79,13 @@ use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use tracing::info;
 use worldgen::{
-    BasicParams, Biome, BiomeData, BoundaryType, ClimateData, Direction, Field, HydrologyData,
-    MapSize, ResourceData, ResourceId, RiverSize, TectonicData, TuningParams, WorldParams,
+    BasicParams, BiomeData, BoundaryType, ClimateData, Direction, Field, HydrologyData, MapSize,
+    ResourceData, RiverSize, StartingPositionData, TectonicData, TuningParams, WorldData,
+    WorldParams,
     debug_viz::{
         BiomeCmap, BoundaryCmap, Categorical, Colormap, Grayscale, HeightLevelCmap, ResourceCmap,
-        Viridis, dump_field_hex, dump_field_pixels, dump_field_with_seed_overlay,
-        dump_rgb_field_hex,
+        Viridis, biome_handle_to_f32, dump_field_hex, dump_field_pixels,
+        dump_field_with_seed_overlay, dump_rgb_field_hex, resource_handle_to_f32,
     },
     generate_world,
 };
@@ -141,8 +148,15 @@ fn main() -> Result<()> {
         &args.output,
         args.hex_size,
     )?;
-    write_biomes(&world.biomes, &args.output, args.hex_size)?;
-    write_resources(&world.resources, &args.output, args.hex_size)?;
+    write_biomes(&world.biomes, &args.output, args.hex_size, &world)?;
+    write_resources(&world.resources, &args.output, args.hex_size, &world)?;
+    write_starting_positions(
+        &world.starting_positions,
+        &world.tectonics,
+        &args.output,
+        args.hex_size,
+        &params,
+    )?;
 
     info!("done");
     Ok(())
@@ -637,14 +651,15 @@ fn river_size_to_f32(river_size: Option<RiverSize>) -> f32 {
 
 // ------------- Output helpers (biomes) -------------
 
-fn write_biomes(biomes: &BiomeData, output: &Path, hex_size: u32) -> Result<()> {
+fn write_biomes(biomes: &BiomeData, output: &Path, hex_size: u32, world: &WorldData) -> Result<()> {
     let biome_path = output.join("34_01_biomes_hex.png");
     info!(path = %biome_path.display(), "writing biome PNG");
+    let biome_cmap = BiomeCmap::new(&world.biome_registry);
     dump_field_hex(
         &biomes.biome,
         &biome_path,
-        biome_to_f32,
-        &BiomeCmap,
+        biome_handle_to_f32,
+        &biome_cmap,
         hex_size,
     )
     .with_context(|| format!("failed to write {}", biome_path.display()))?;
@@ -657,40 +672,34 @@ fn write_biomes(biomes: &BiomeData, output: &Path, hex_size: u32) -> Result<()> 
     Ok(())
 }
 
-fn biome_to_f32(biome: Option<Biome>) -> f32 {
-    match biome {
-        None => 0.0,
-        Some(Biome::TropicalRainforest) => 1.0,
-        Some(Biome::TemperateForest) => 2.0,
-        Some(Biome::BorealForest) => 3.0,
-        Some(Biome::Grassland) => 4.0,
-        Some(Biome::Desert) => 5.0,
-        Some(Biome::Tundra) => 6.0,
-    }
-}
-
 // ------------- Output helpers (resources) -------------
 
-fn write_resources(resources: &ResourceData, output: &Path, hex_size: u32) -> Result<()> {
+fn write_resources(
+    resources: &ResourceData,
+    output: &Path,
+    hex_size: u32,
+    world: &WorldData,
+) -> Result<()> {
     let combined_path = output.join("35_01_resources_hex.png");
     info!(path = %combined_path.display(), "writing resources PNG");
+    let resource_cmap = ResourceCmap::new(&world.resource_registry);
     dump_field_hex(
         &resources.resource,
         &combined_path,
-        resource_to_f32,
-        &ResourceCmap,
+        resource_handle_to_f32,
+        &resource_cmap,
         hex_size,
     )
     .with_context(|| format!("failed to write {}", combined_path.display()))?;
 
-    for &resource in ResourceId::ALL {
-        let path = output.join(format!("35_02_resource_{}_px.png", resource_name(resource)));
-        info!(path = %path.display(), resource = ?resource, "writing resource overlay PNG");
+    for (handle, id) in world.resource_registry.inner.iter() {
+        let path = output.join(format!("35_02_resource_{id}_px.png"));
+        info!(path = %path.display(), resource = %id, "writing resource overlay PNG");
         dump_field_pixels(
             &resources.resource,
             &path,
             |tile| {
-                if tile == Some(resource) { 1.0 } else { 0.0 }
+                if tile == Some(handle) { 1.0 } else { 0.0 }
             },
             &Grayscale,
         )
@@ -700,35 +709,61 @@ fn write_resources(resources: &ResourceData, output: &Path, hex_size: u32) -> Re
     Ok(())
 }
 
-fn resource_to_f32(resource: Option<ResourceId>) -> f32 {
-    match resource {
-        None => 0.0,
-        Some(ResourceId::Iron) => 1.0,
-        Some(ResourceId::Horses) => 2.0,
-        Some(ResourceId::Gold) => 3.0,
-        Some(ResourceId::Gems) => 4.0,
-        Some(ResourceId::Spices) => 5.0,
-        Some(ResourceId::Wine) => 6.0,
-        Some(ResourceId::Wheat) => 7.0,
-        Some(ResourceId::Fish) => 8.0,
-        Some(ResourceId::Stone) => 9.0,
-    }
+// ------------- Output helpers (starting positions) -------------
+
+fn write_starting_positions(
+    starting_positions: &StartingPositionData,
+    tectonics: &TectonicData,
+    output: &Path,
+    hex_size: u32,
+    params: &WorldParams,
+) -> Result<()> {
+    let max_viability = starting_positions
+        .viability
+        .iter()
+        .copied()
+        .fold(0.0_f32, f32::max);
+
+    let to_f32 = move |v: f32| {
+        if max_viability > 0.0 {
+            v / max_viability
+        } else {
+            0.0
+        }
+    };
+
+    let viability_path = output.join("36_01_viability_hex.png");
+    info!(path = %viability_path.display(), "writing viability hex PNG");
+    dump_field_hex(
+        &starting_positions.viability,
+        &viability_path,
+        to_f32,
+        &Viridis,
+        hex_size,
+    )
+    .with_context(|| format!("failed to write {}", viability_path.display()))?;
+
+    let n = starting_positions.start_positions.len();
+    info!(count = n, "start positions selected");
+
+    let starts_path = output.join("36_02_start_positions_px.png");
+    info!(path = %starts_path.display(), "writing start positions PNG");
+    dump_field_with_seed_overlay(
+        &tectonics.height_level,
+        &starting_positions.start_positions,
+        &starts_path,
+        |&v| f32::from(v),
+        &HeightLevelCmap {
+            land_level_count: params.tuning.tectonics.land_level_count,
+        },
+        START_POSITION_COLOR,
+    )
+    .with_context(|| format!("failed to write {}", starts_path.display()))?;
+
+    Ok(())
 }
 
-fn resource_name(resource: ResourceId) -> &'static str {
-    match resource {
-        ResourceId::Iron => "iron",
-        ResourceId::Horses => "horses",
-        ResourceId::Gold => "gold",
-        ResourceId::Gems => "gems",
-        ResourceId::Spices => "spices",
-        ResourceId::Wine => "wine",
-        ResourceId::Wheat => "wheat",
-        ResourceId::Fish => "fish",
-        ResourceId::Stone => "stone",
-    }
-}
-
+const START_POSITION_COLOR: [u8; 3] = [255, 255, 0]; // bright yellow
 const LAKE_COLOR: [u8; 3] = [0, 170, 170];
 const RIVER_COLOR: [u8; 3] = [255, 105, 180];
 const MAJOR_RIVER_COLOR: [u8; 3] = [130, 70, 210];

@@ -2,6 +2,11 @@
 //
 // Resource placement config for Stage 3.5.
 //
+// Resources are keyed by stable snake_case string IDs. These IDs are the
+// authoritative identity for resources across saves and the network.
+// Runtime handles are derived by sorting IDs alphabetically at load time
+// and are never persisted.
+//
 // Rarity is the target fraction of eligible tiles before the Advanced
 // resource_abundance multiplier. Each tile can hold at most one resource.
 // Terrain filters are OR-combined; biome filters restrict land resources.
@@ -10,7 +15,7 @@
 //   0.0 = equator, 1.0 = poles.
 (
     strategic: {
-        Iron: (
+        "iron": (
             category: Strategic,
             eligible_biomes: [],
             eligible_terrain: [FlatLand, Hills],
@@ -28,9 +33,9 @@
                 Industrial: 0.35,
             },
         ),
-        Horses: (
+        "horses": (
             category: Strategic,
-            eligible_biomes: [Grassland],
+            eligible_biomes: ["grassland"],
             eligible_terrain: [FlatLand],
             latitude_preference: None,
             rarity: 0.016,
@@ -49,7 +54,7 @@
     },
 
     luxury: {
-        Gold: (
+        "gold": (
             category: Luxury,
             eligible_biomes: [],
             eligible_terrain: [FlatLand, Hills],
@@ -67,7 +72,7 @@
                 Industrial: 0.1,
             },
         ),
-        Gems: (
+        "gems": (
             category: Luxury,
             eligible_biomes: [],
             eligible_terrain: [Hills],
@@ -85,9 +90,9 @@
                 Industrial: 0.1,
             },
         ),
-        Spices: (
+        "spices": (
             category: Luxury,
-            eligible_biomes: [TropicalRainforest, Grassland],
+            eligible_biomes: ["tropical_rainforest", "grassland"],
             eligible_terrain: [FlatLand],
             latitude_preference: Some((min: 0.0, max: 0.40)),
             rarity: 0.012,
@@ -103,9 +108,9 @@
                 Industrial: 0.2,
             },
         ),
-        Wine: (
+        "wine": (
             category: Luxury,
-            eligible_biomes: [TemperateForest, Grassland],
+            eligible_biomes: ["temperate_forest", "grassland"],
             eligible_terrain: [FlatLand],
             latitude_preference: Some((min: 0.20, max: 0.70)),
             rarity: 0.011,
@@ -124,9 +129,9 @@
     },
 
     bonus: {
-        Wheat: (
+        "wheat": (
             category: Bonus,
-            eligible_biomes: [Grassland, TemperateForest],
+            eligible_biomes: ["grassland", "temperate_forest"],
             eligible_terrain: [FlatLand],
             latitude_preference: None,
             rarity: 0.026,
@@ -136,7 +141,7 @@
             baseline_fraction: 1.0,
             mineral_affinities: {},
         ),
-        Fish: (
+        "fish": (
             category: Bonus,
             eligible_biomes: [],
             eligible_terrain: [Ocean, Coast],
@@ -148,7 +153,7 @@
             baseline_fraction: 1.0,
             mineral_affinities: {},
         ),
-        Stone: (
+        "stone": (
             category: Bonus,
             eligible_biomes: [],
             eligible_terrain: [Hills],

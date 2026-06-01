@@ -7,8 +7,11 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
+content  = { workspace = true }
 coords   = { workspace = true }
 worldgen = { workspace = true }
+ron      = { workspace = true }
+serde    = { workspace = true }
 bevy     = { workspace = true, features = [
     "bevy_gltf",
     "bevy_pbr",

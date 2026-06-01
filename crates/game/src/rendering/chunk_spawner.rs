@@ -13,7 +13,6 @@ use bevy::{
     render::render_resource::{Extent3d, TextureDimension, TextureFormat},
 };
 use coords::{Coord, MapBounds};
-use worldgen::{WorldData, generate_world};
 
 use crate::{
     app_state::RenderAppState,
@@ -33,14 +32,8 @@ use crate::{
             configure_placeholder_texture,
         },
     },
+    sim::StaticTerrain,
 };
-
-/// Generated world data available to rendering and future game systems.
-#[derive(Resource)]
-pub(crate) struct GeneratedWorld {
-    /// Generated world data consumed by rendering and future game systems.
-    pub(crate) data: WorldData,
-}
 
 /// World-space dimensions of the static generated map.
 #[derive(Resource, Clone, Copy)]
@@ -142,21 +135,20 @@ pub(crate) fn finish_render_asset_loading(
 pub(crate) fn spawn_chunks(
     mut commands: Commands,
     config: Res<RenderStartupConfig>,
+    terrain: Res<StaticTerrain>,
     prepared_assets: PreparedRenderAssets,
     mut meshes: ResMut<Assets<Mesh>>,
     mut material_assets: TerrainMaterialAssets,
     mut next_state: ResMut<NextState<RenderAppState>>,
 ) {
-    let world = generate_world(&config.world_params)
-        .expect("render startup world generation parameters must be valid");
-    let bounds = world.bounds;
+    let bounds = terrain.bounds;
     let (map_width, map_height) = map_world_size(bounds);
 
     match config.terrain_renderer {
         TerrainRenderer::VertexColor => {
             let material = material_assets.color.add(ColorMaterial::from(Color::WHITE));
             for origin in chunk_origins(bounds) {
-                let mesh = build_vertex_color_chunk_mesh(origin, bounds, &world);
+                let mesh = build_vertex_color_chunk_mesh(origin, &terrain);
                 commands.spawn((
                     TerrainChunk,
                     Mesh2d(meshes.add(mesh)),
@@ -177,7 +169,7 @@ pub(crate) fn spawn_chunks(
                 .add(TerrainTextureArrayMaterial::from_texture(texture));
 
             for origin in chunk_origins(bounds) {
-                let mesh = build_texture_chunk_mesh(origin, bounds, &world);
+                let mesh = build_texture_chunk_mesh(origin, &terrain);
                 commands.spawn((
                     TerrainChunk,
                     Mesh2d(meshes.add(mesh)),
@@ -205,7 +197,7 @@ pub(crate) fn spawn_chunks(
             });
 
             for origin in chunk_origins(bounds) {
-                let mesh = build_terrain_3d_chunk_mesh(origin, bounds, &world);
+                let mesh = build_terrain_3d_chunk_mesh(origin, &terrain);
                 commands.spawn((
                     TerrainChunk,
                     Mesh3d(meshes.add(mesh)),
@@ -224,7 +216,7 @@ pub(crate) fn spawn_chunks(
                 .feature_models
                 .as_ref()
                 .expect("feature model assets must be prepared before 3D chunk spawning");
-            spawn_feature_models(&mut commands, feature_models, &world, bounds);
+            spawn_feature_models(&mut commands, feature_models, &terrain);
         }
     }
 
@@ -237,7 +229,6 @@ pub(crate) fn spawn_chunks(
         width: map_width,
         height: map_height,
     });
-    commands.insert_resource(GeneratedWorld { data: world });
     next_state.set(RenderAppState::Running);
 }
 

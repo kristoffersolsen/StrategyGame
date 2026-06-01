@@ -8,15 +8,21 @@ use bevy::{
     ecs::system::SystemParam,
     input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseButton},
     prelude::{
-        BackgroundColor, ButtonInput, Camera2d, Camera3d, Color, Commands, Component, KeyCode,
-        Node, PositionType, Projection, Query, Res, ResMut, Resource, Text, TextColor, TextFont,
-        Time, Timer, TimerMode, Transform, Val, Vec2, Vec3, With, default, px,
+        BackgroundColor, ButtonInput, Camera, Camera2d, Camera3d, Color, Commands, Component,
+        GlobalTransform, KeyCode, Node, PositionType, Projection, Query, Res, ResMut, Resource,
+        Text, TextColor, TextFont, Time, Timer, TimerMode, Transform, Val, Vec2, Vec3, With,
+        default, px,
     },
+    window::PrimaryWindow,
 };
 
-use crate::rendering::{
-    RenderStartupConfig, TerrainRenderer,
-    chunk_spawner::{GeneratedWorld, MapRenderBounds},
+use crate::{
+    input::cursor_to_coord,
+    rendering::{
+        RenderStartupConfig, TerrainRenderer, chunk_spawner::MapRenderBounds,
+        hex_mesh::tile_center_position,
+    },
+    sim::{StaticTerrain, TurnState},
 };
 
 const PAN_SPEED: f32 = 500.0;
@@ -71,10 +77,17 @@ pub(crate) fn spawn_map_camera(
     mut commands: Commands,
     config: Res<RenderStartupConfig>,
     map_bounds: Res<MapRenderBounds>,
-    world: Res<GeneratedWorld>,
+    terrain: Res<StaticTerrain>,
 ) {
-    let _tile_count = world.data.bounds.width() * world.data.bounds.height();
-    let pivot = Vec3::new(map_bounds.width * 0.5, -map_bounds.height * 0.5, 0.0);
+    // Center on the settler spawn position; fall back to map centre if there
+    // are no start positions (should not happen in practice).
+    let pivot = terrain.start_positions.first().map_or_else(
+        || Vec3::new(map_bounds.width * 0.5, -map_bounds.height * 0.5, 0.0),
+        |&coord| {
+            let [x, y, _] = tile_center_position(&terrain, coord);
+            Vec3::new(x, y, 0.0)
+        },
+    );
 
     match config.terrain_renderer {
         TerrainRenderer::VertexColor | TerrainRenderer::TextureArray => {
@@ -166,7 +179,7 @@ pub(crate) fn update_orbit_camera(
         return;
     };
 
-    if input.mouse_buttons.pressed(MouseButton::Right) {
+    if input.mouse_buttons.pressed(MouseButton::Middle) {
         orbit.yaw -= input.mouse_motion.delta.x * ORBIT_MOUSE_SENSITIVITY;
         orbit.pitch = (orbit.pitch + input.mouse_motion.delta.y * ORBIT_MOUSE_SENSITIVITY)
             .clamp(ORBIT_MIN_PITCH, ORBIT_MAX_PITCH);
@@ -230,6 +243,157 @@ pub(crate) fn spawn_fps_overlay(mut commands: Commands) {
         },
         FpsText,
     ));
+}
+
+/// Marker for the turn counter text entity.
+#[derive(Component)]
+pub(crate) struct TurnText;
+
+/// Spawns the turn counter in the top-right corner.
+pub(crate) fn spawn_turn_overlay(mut commands: Commands) {
+    commands.spawn((
+        Text::new("Turn 0"),
+        TextFont {
+            font_size: 18.0,
+            ..default()
+        },
+        TextColor(Color::WHITE),
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.65)),
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(8),
+            right: px(8),
+            padding: bevy::prelude::UiRect::all(Val::Px(6.0)),
+            ..default()
+        },
+        TurnText,
+    ));
+}
+
+/// Updates the turn counter from [`TurnState`].
+pub(crate) fn update_turn_overlay(
+    turn_state: Res<TurnState>,
+    mut text: Query<&mut Text, With<TurnText>>,
+) {
+    let Ok(mut text) = text.single_mut() else {
+        return;
+    };
+    **text = format!("Turn {}", turn_state.turn);
+}
+
+/// Marker for the tile info and coordinate readout text entity.
+#[derive(Component)]
+pub(crate) struct CoordText;
+
+/// Spawns the tile info and coordinate readout in the bottom-left corner.
+pub(crate) fn spawn_coord_overlay(mut commands: Commands) {
+    commands.spawn((
+        Text::new("Terrain: --\nTile: --"),
+        TextFont {
+            font_size: 18.0,
+            ..default()
+        },
+        TextColor(Color::WHITE),
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.65)),
+        Node {
+            position_type: PositionType::Absolute,
+            bottom: px(8),
+            left: px(8),
+            padding: bevy::prelude::UiRect::all(Val::Px(6.0)),
+            ..default()
+        },
+        CoordText,
+    ));
+}
+
+/// Updates the tile info and coordinate readout with the hex under the cursor.
+pub(crate) fn update_coord_overlay(
+    window: Query<&bevy::window::Window, With<PrimaryWindow>>,
+    camera: Query<(&Camera, &GlobalTransform), With<MapCamera>>,
+    terrain: Res<StaticTerrain>,
+    mut text: Query<&mut Text, With<CoordText>>,
+) {
+    let Ok(window) = window.single() else {
+        return;
+    };
+    let Ok((camera, camera_transform)) = camera.single() else {
+        return;
+    };
+    let Ok(mut text) = text.single_mut() else {
+        return;
+    };
+
+    **text = match cursor_to_coord(window, camera, camera_transform, &terrain) {
+        Some(coord) => format!(
+            "{}\nTile: ({}, {})",
+            tile_info_label(&terrain, coord),
+            coord.q,
+            coord.r
+        ),
+        None => "Terrain: --\nTile: --".to_owned(),
+    };
+}
+
+fn tile_info_label(terrain: &StaticTerrain, coord: coords::Coord) -> String {
+    let biome = terrain.biome.get(coord).copied().flatten();
+    let is_forest = biome.is_some_and(|handle| terrain.biome_registry.is_forest_biome(handle));
+    let biome_id = biome.map(|handle| terrain.biome_registry.id_of(handle));
+
+    let biome_label = biome_id.map_or_else(
+        || terrain_type_label(terrain, coord).to_owned(),
+        |id| display_biome_label(id, is_forest),
+    );
+
+    let mut features = Vec::new();
+    if is_forest {
+        features.push("forest".to_owned());
+    }
+    if terrain.is_hilly.get(coord).copied().unwrap_or(false) {
+        features.push("hills".to_owned());
+    }
+    if terrain.has_river.get(coord).copied().unwrap_or(false) {
+        features.push("river".to_owned());
+    }
+    if terrain.is_floodplain.get(coord).copied().unwrap_or(false) {
+        features.push("floodplain".to_owned());
+    }
+    if let Some(resource) = terrain.resource.get(coord).copied().flatten() {
+        features.push(display_id_label(terrain.resource_registry.id_of(resource)));
+    }
+
+    if features.is_empty() {
+        format!("Terrain: {biome_label}")
+    } else {
+        format!("Terrain: {}, {}", biome_label, features.join(", "))
+    }
+}
+
+fn display_biome_label(id: &str, is_forest: bool) -> String {
+    let base = if is_forest {
+        id.strip_suffix("_forest").unwrap_or(id)
+    } else {
+        id
+    };
+    display_id_label(base)
+}
+
+fn display_id_label(id: &str) -> String {
+    id.replace('_', " ")
+}
+
+fn terrain_type_label(terrain: &StaticTerrain, coord: coords::Coord) -> &'static str {
+    let height_level = terrain.height_level.get(coord).copied().unwrap_or(0);
+    if terrain.is_lake.get(coord).copied().unwrap_or(false) {
+        "lake"
+    } else if height_level == 0 {
+        "ocean"
+    } else if height_level == 1 {
+        "coast"
+    } else if height_level >= terrain.mountain_level {
+        "mountain"
+    } else {
+        "land"
+    }
 }
 
 pub(crate) fn update_fps_overlay(

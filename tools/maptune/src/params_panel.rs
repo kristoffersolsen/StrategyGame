@@ -74,6 +74,7 @@ fn map_size_label(s: MapSize) -> &'static str {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn tectonics_section(ui: &mut egui::Ui, params: &mut TuningParams) {
     let defaults = worldgen::TuningParams::defaults();
     let t = &mut params.tectonics;
@@ -320,6 +321,7 @@ fn tectonics_section(ui: &mut egui::Ui, params: &mut TuningParams) {
         });
 }
 
+#[allow(clippy::too_many_lines)]
 fn climate_section(ui: &mut egui::Ui, params: &mut TuningParams) {
     let defaults = worldgen::TuningParams::defaults();
     let c = &mut params.climate;

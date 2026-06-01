@@ -6,17 +6,20 @@ use coords::MapBounds;
 
 use crate::Field;
 use crate::params::BiomeParams;
-use crate::world_data::{Biome, HydrologyData};
+use crate::world_data::{BiomeHandle, HydrologyData};
 
+// Three neighbors required for majority replacement: conservative threshold
+// that prevents over-smoothing. Could be a BiomeParams field, but the
+// existing smoothing_passes param already controls aggressiveness.
 const MIN_MAJORITY_NEIGHBORS: u8 = 3;
 
 /// Runs the configured number of smoothing passes.
 pub(super) fn smooth_biomes(
     bounds: MapBounds,
-    biome: &Field<Option<Biome>>,
+    biome: &Field<Option<BiomeHandle>>,
     hydrology: &HydrologyData,
     params: &BiomeParams,
-) -> Field<Option<Biome>> {
+) -> Field<Option<BiomeHandle>> {
     let mut current = biome.clone();
     for _ in 0..params.smoothing_passes {
         current = smooth_once(bounds, &current, hydrology);
@@ -26,14 +29,15 @@ pub(super) fn smooth_biomes(
 
 fn smooth_once(
     bounds: MapBounds,
-    biome: &Field<Option<Biome>>,
+    biome: &Field<Option<BiomeHandle>>,
     hydrology: &HydrologyData,
-) -> Field<Option<Biome>> {
+) -> Field<Option<BiomeHandle>> {
     Field::from_fn(bounds, |coord| {
         let current = biome[coord]?;
 
         let mut same_count = 0_u8;
-        let mut counts = BTreeMap::<Biome, u8>::new();
+        // BiomeHandle implements Ord, so BTreeMap works directly.
+        let mut counts = BTreeMap::<BiomeHandle, u8>::new();
         for neighbor in bounds.neighbors(coord).into_iter().flatten() {
             if hydrology.is_lake[neighbor] {
                 continue;

@@ -7,17 +7,18 @@ It is updated at each stage gate as new structure is added.
 For *why* the architecture is this way, see `docs/design/overview.md`.
 For *when* decisions were made, see `documents/adr/`.
 
-**Current stage:** Stage P3.1 map rendering implemented; full P3 scene
-work continues.
+**Current stage:** Stage 4.5 (Anti-corruption layer) complete; Stages 4, 3.6,
+and rendering plan P1–P3 also complete.
 
 ---
 
 ## Workspace layout
 crates/ \
+content/    — content registry: string-id→handle mapping, used by worldgen and game \
 coords/     — wrap-aware hexagonal coordinate math (no dependencies) \
 det_rng/    — deterministic RNG primitives (no project dependencies) \
-worldgen/   — procedural world generation pipeline (depends on coords, det_rng) \
-game/       — Bevy application and runtime (depends on coords, worldgen) \
+worldgen/   — procedural world generation pipeline (depends on coords, det_rng, content) \
+game/       — Bevy application and runtime (depends on coords, worldgen, content) \
 tools/ \
 mapdump/    — CLI: dump a single seed's generation output to PNG \
 maprender/  — Bevy app: interactive map rendering performance gate \
@@ -70,6 +71,33 @@ rasterization helpers used by both tools.
 The Bevy application. Owns the ECS world, plugin registration, systems,
 and all runtime logic. Reads `WorldData` from `worldgen` to spawn
 entities at game start.
+
+The game crate is divided into two trust tiers (see ADR trust-tier note in
+`documents/planning/implementation_plan2.md`):
+
+- **`sim` module (authoritative core).** The only tier permitted to mutate
+  game state. Contains:
+  - `StaticTerrain` — `game`'s owned static terrain resource. Built by
+    consuming `WorldData` at startup via `from_world_data` (the anti-corruption
+    layer, ADR-0025). Contains only runtime-relevant fields plus precomputed
+    derivations (movement cost, `mountain_level`). `WorldData` is dropped
+    immediately after translation; no `worldgen`-internal type persists.
+  - `TileState` — mutable per-tile state as parallel `Field<T>` grids
+    (owner, occupant, improvement, infrastructure, cleared). See ADR-0023.
+  - `NetworkId` / `NetworkIdAllocator` / `EntityLookup` — deterministic
+    cross-machine actor identity and the non-authoritative entity cache.
+    See ADR-0024.
+  - `YieldTable` — dense biome- and feature-indexed yield data loaded from
+    `assets/worldgen/yield_table.ron` at startup.
+  - `tile_yield(coord)` — the shared tile yield function combining static
+    terrain and dynamic tile state.
+  - `SimPlugin` — registers the above resources; `sim_startup` (in the
+    `Startup` schedule) generates and translates the world, and `sim_init`
+    (on `Running` entry) builds `TileState` and `YieldTable`.
+
+- **`rendering` module (presentation tier).** Reads `StaticWorld` and
+  future events from the core; never mutates game state. Contains the
+  terrain chunk renderer, camera, lighting, and FPS overlay.
 
 Stage P1/P2/P3.1 adds the static map rendering foundation:
 
@@ -139,13 +167,19 @@ changing the game crate startup architecture.
 game     ──► coords \
 ──► worldgen ──► coords \
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└──► det_rng \
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└──► content \
+──► content \
 mapdump  ──► worldgen ──► (above) \
 maprender ─► game ──► worldgen ──► (above) \
 maptest  ──► worldgen ──► (above)
 
-No cycles. `coords` and `det_rng` have zero project dependencies.
-`worldgen` does not depend on `game`. `game` does not depend on
-`mapdump`.
+No cycles. `coords`, `det_rng`, and `content` have zero project dependencies.
+`worldgen` does not depend on `game`. `game` does not depend on `mapdump`.
+
+Within `game`, the module dependency direction is `rendering` → `sim` (the
+rendering module imports `sim::StaticWorld`); `sim` never imports from
+`rendering`. This enforces the trust-tier rule: presentation depends on core,
+not vice versa.
 
 ---
 
@@ -189,5 +223,31 @@ No cycles. `coords` and `det_rng` have zero project dependencies.
   run through `tools/maprender` with RON presets. The game crate exposes
   reusable rendering plugins and startup configuration rather than
   hardcoding test worlds in production startup.
+
+- **Anti-corruption layer at the `worldgen`→`game` boundary (ADR-0025)** —
+  `game` owns `StaticTerrain`, shaped by what the runtime needs (not by
+  `worldgen`'s internal layout). `WorldData` is consumed at startup and
+  dropped immediately after translation, so `worldgen`'s internal types never
+  appear in `game`'s runtime. This lets both crates evolve independently.
+  Shared vocabulary (`Coord`, content handles) crosses the boundary as-is.
+
+- **Dense-grid tile state, not per-tile entities (ADR-0023)** — mutable
+  per-tile state lives in `TileState` as parallel `Field<T>` grids. Tiles
+  are not ECS entities; only units and cities are entities. Rationale:
+  at-scale archetype churn, O(1) coordinate access, and determinism.
+
+- **`NetworkId` as authoritative cross-tile reference (ADR-0024)** — the
+  tile grids store `Option<NetworkId>`, not `Option<Entity>`. Entity indices
+  diverge across machines; `NetworkId` is derived from command-processing
+  order and is identical everywhere.
+
+- **`YieldTable` hot-path discipline (ADR-0022)** — biome string IDs are
+  resolved to handles once at startup. All per-tile yield reads are O(1)
+  array lookups indexed by handle; no string lookups at runtime.
+
+- **`tile_yield(coord)` as the single shared yield function** — cities,
+  worker-radius views, and the full-map yield overlay all call the same
+  function. Its additive base (biome + features + resource) plus single
+  improvement transform keeps the model simple and extensible.
 
 For the full decision history, see `documents/adr/`.

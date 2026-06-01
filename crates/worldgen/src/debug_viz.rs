@@ -43,7 +43,7 @@ use coords::Coord;
 use image::{ImageError, RgbImage};
 
 use crate::Field;
-use crate::world_data::{Biome, ResourceId};
+use crate::world_data::{BiomeHandle, BiomeRegistry, ResourceHandle, ResourceRegistry};
 
 // ------------- Error type -------------
 
@@ -127,39 +127,86 @@ impl Colormap for Categorical {
 }
 
 /// Categorical colormap for resource overlays.
-pub struct ResourceCmap;
+///
+/// Stateful: built from a [`ResourceRegistry`] so colors are assigned
+/// by registry handle index rather than hardcoded enum discriminants.
+pub struct ResourceCmap {
+    /// Per-handle color, indexed by `handle.index()`. Index 0 is
+    /// reserved for "no resource" and always uses the background color.
+    colors: Vec<[u8; 3]>,
+}
 
-impl Colormap for ResourceCmap {
-    fn color(&self, value: f32) -> [u8; 3] {
-        match resource_value_to_id(value) {
-            None => [18, 24, 28],
-            Some(ResourceId::Iron) => [120, 120, 125],
-            Some(ResourceId::Horses) => [185, 120, 55],
-            Some(ResourceId::Gold) => [235, 190, 45],
-            Some(ResourceId::Gems) => [60, 190, 210],
-            Some(ResourceId::Spices) => [210, 80, 45],
-            Some(ResourceId::Wine) => [145, 45, 115],
-            Some(ResourceId::Wheat) => [225, 210, 105],
-            Some(ResourceId::Fish) => [65, 145, 220],
-            Some(ResourceId::Stone) => [150, 150, 135],
-        }
+impl ResourceCmap {
+    /// Builds a colormap from a resource registry.
+    ///
+    /// Colors are assigned by string ID using [`color_for_resource`].
+    #[must_use]
+    pub fn new(registry: &ResourceRegistry) -> Self {
+        let colors = registry
+            .inner
+            .iter()
+            .map(|(_, id)| color_for_resource(id))
+            .collect();
+        Self { colors }
     }
 }
 
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn resource_value_to_id(value: f32) -> Option<ResourceId> {
-    let index = value.round() as i32;
-    match index {
-        1 => Some(ResourceId::Iron),
-        2 => Some(ResourceId::Horses),
-        3 => Some(ResourceId::Gold),
-        4 => Some(ResourceId::Gems),
-        5 => Some(ResourceId::Spices),
-        6 => Some(ResourceId::Wine),
-        7 => Some(ResourceId::Wheat),
-        8 => Some(ResourceId::Fish),
-        9 => Some(ResourceId::Stone),
-        _ => None,
+impl Colormap for ResourceCmap {
+    fn color(&self, value: f32) -> [u8; 3] {
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let index = value.round() as i32;
+        if index <= 0 {
+            return [18, 24, 28]; // background: no resource
+        }
+        #[allow(clippy::cast_sign_loss)]
+        let idx = (index - 1) as usize;
+        self.colors.get(idx).copied().unwrap_or([18, 24, 28])
+    }
+}
+
+/// Returns the RGB color for a resource identified by string ID.
+///
+/// Colors are assigned by name so they remain stable regardless of
+/// alphabetical ordering changes.
+#[must_use]
+pub fn color_for_resource(id: &str) -> [u8; 3] {
+    match id {
+        "iron" => [120, 120, 125],
+        "horses" => [185, 120, 55],
+        "gold" => [235, 190, 45],
+        "gems" => [60, 190, 210],
+        "spices" => [210, 80, 45],
+        "wine" => [145, 45, 115],
+        "wheat" => [225, 210, 105],
+        "fish" => [65, 145, 220],
+        "stone" => [150, 150, 135],
+        _ => [128, 128, 128], // fallback for unknown resources
+    }
+}
+
+/// Encodes an optional resource handle as an `f32` for use with [`ResourceCmap`].
+///
+/// - `None` → `0.0`
+/// - `Some(handle)` → `handle.index() as f32 + 1.0`
+#[must_use]
+pub fn resource_handle_to_f32(handle: Option<ResourceHandle>) -> f32 {
+    match handle {
+        None => 0.0,
+        #[allow(clippy::cast_precision_loss)]
+        Some(h) => h.index() as f32 + 1.0,
+    }
+}
+
+/// Encodes an optional biome handle as an `f32` for use with [`BiomeCmap`].
+///
+/// - `None` → `0.0`
+/// - `Some(handle)` → `handle.index() as f32 + 1.0`
+#[must_use]
+pub fn biome_handle_to_f32(handle: Option<BiomeHandle>) -> f32 {
+    match handle {
+        None => 0.0,
+        #[allow(clippy::cast_precision_loss)]
+        Some(h) => h.index() as f32 + 1.0,
     }
 }
 
@@ -681,36 +728,56 @@ impl Colormap for HeightLevelCmap {
 }
 
 /// Categorical colour map for biome classifications.
-pub struct BiomeCmap;
+///
+/// Stateful: built from a [`BiomeRegistry`] so colors are assigned by
+/// registry handle index rather than hardcoded enum discriminants.
+pub struct BiomeCmap {
+    /// Per-handle color, indexed by `handle.index()`.
+    colors: Vec<[u8; 3]>,
+}
 
 impl BiomeCmap {
-    /// Returns the RGB colour for an optional biome.
+    /// Builds a colormap from a biome registry.
+    ///
+    /// Colors are assigned by string ID using [`color_for_biome`].
     #[must_use]
-    pub const fn color_for_biome(biome: Option<Biome>) -> [u8; 3] {
-        match biome {
-            None => [45, 55, 65],
-            Some(Biome::TropicalRainforest) => [0, 118, 74],
-            Some(Biome::TemperateForest) => [80, 145, 60],
-            Some(Biome::BorealForest) => [43, 92, 105],
-            Some(Biome::Grassland) => [196, 190, 85],
-            Some(Biome::Desert) => [218, 184, 105],
-            Some(Biome::Tundra) => [198, 212, 218],
-        }
+    pub fn new(registry: &BiomeRegistry) -> Self {
+        let colors = registry
+            .inner
+            .iter()
+            .map(|(_, id)| color_for_biome(id))
+            .collect();
+        Self { colors }
     }
 }
 
 impl Colormap for BiomeCmap {
     fn color(&self, value: f32) -> [u8; 3] {
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        match value.round() as u8 {
-            1 => Self::color_for_biome(Some(Biome::TropicalRainforest)),
-            2 => Self::color_for_biome(Some(Biome::TemperateForest)),
-            3 => Self::color_for_biome(Some(Biome::BorealForest)),
-            4 => Self::color_for_biome(Some(Biome::Grassland)),
-            5 => Self::color_for_biome(Some(Biome::Desert)),
-            6 => Self::color_for_biome(Some(Biome::Tundra)),
-            _ => Self::color_for_biome(None),
+        let index = value.round() as i32;
+        if index <= 0 {
+            return [45, 55, 65]; // background: no biome
         }
+        #[allow(clippy::cast_sign_loss)]
+        let idx = (index - 1) as usize;
+        self.colors.get(idx).copied().unwrap_or([45, 55, 65])
+    }
+}
+
+/// Returns the RGB colour for a biome identified by string ID.
+///
+/// Colors are assigned by name so they remain stable regardless of
+/// alphabetical ordering changes.
+#[must_use]
+pub fn color_for_biome(id: &str) -> [u8; 3] {
+    match id {
+        "tropical_rainforest" => [0, 118, 74],
+        "temperate_forest" => [80, 145, 60],
+        "boreal_forest" => [43, 92, 105],
+        "grassland" => [196, 190, 85],
+        "desert" => [218, 184, 105],
+        "tundra" => [198, 212, 218],
+        _ => [45, 55, 65], // fallback for unknown biomes
     }
 }
 

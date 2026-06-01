@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/content",
     "crates/coords",
     "crates/det_rng",
     "crates/worldgen",
@@ -20,6 +21,7 @@ license = "TBD"
 
 [workspace.dependencies]
 # Workspace crates
+content  = { path = "crates/content" }
 coords  = { path = "crates/coords" }
 det-rng = { path = "crates/det_rng" }
 worldgen = { path = "crates/worldgen" }

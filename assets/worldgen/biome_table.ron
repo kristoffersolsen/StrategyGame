@@ -33,20 +33,20 @@
 //   6  very-humid     ≈ [0.74, 0.86)
 //   7  wet            ≈ [0.86, 1.00]
 //
-// Biome variants:
-//   Tundra              — cold, sparse ground cover; low productivity
-//   BorealForest        — taiga; coniferous; cold winters
-//   TemperateForest     — deciduous / mixed; moderate climate
-//   TropicalRainforest  — dense canopy; high heat and moisture
-//   Grassland           — open plains, savanna; moderate temperature range
-//   Desert              — low moisture at any temperature
+// Biome string IDs (snake_case, stable across saves and network):
+//   "tundra"               — cold, sparse ground cover; low productivity
+//   "boreal_forest"        — taiga; coniferous; cold winters
+//   "temperate_forest"     — deciduous / mixed; moderate climate
+//   "tropical_rainforest"  — dense canopy; high heat and moisture
+//   "grassland"            — open plains, savanna; moderate temperature range
+//   "desert"               — low moisture at any temperature
 //
 // Hydrology overrides (river tiles, floodplains, lake-adjacent tiles) are
 // applied on top of this table in step 4 of the biome stage. They can
-// reclassify Desert → Grassland and Grassland → TemperateForest in
+// reclassify "desert" → "grassland" and "grassland" → "temperate_forest" in
 // proximity to water. The table itself does not encode those overrides.
 //
-// To modify: edit the Biome variant at the relevant (t, m) position.
+// To modify: edit the biome string at the relevant (t, m) position.
 // The validate() call at pipeline startup will reject any table that
 // leaves a reachable (t, m) combination unassigned.
 (
@@ -54,6 +54,16 @@
     // and moisture_bin_count exactly.
     temperature_bin_count: 8,
     moisture_bin_count: 8,
+
+    // Biome descriptors keyed by stable string ID.
+    biomes: {
+        "boreal_forest":       ( is_forest: true ),
+        "desert":              ( is_forest: false ),
+        "grassland":           ( is_forest: false ),
+        "temperate_forest":    ( is_forest: true ),
+        "tropical_rainforest": ( is_forest: true ),
+        "tundra":              ( is_forest: false ),
+    },
 
     // entries: list of { t, m, biome } covering every (t, m) pair.
     // Order does not matter; validate() checks completeness.
@@ -63,14 +73,14 @@
         // Everything is Tundra. Moisture is irrelevant at this temperature;
         // no liquid water, no tree growth regardless of precipitation.
         // ----------------------------------------------------------------
-        ( t: 0, m: 0, biome: Tundra ),
-        ( t: 0, m: 1, biome: Tundra ),
-        ( t: 0, m: 2, biome: Tundra ),
-        ( t: 0, m: 3, biome: Tundra ),
-        ( t: 0, m: 4, biome: Tundra ),
-        ( t: 0, m: 5, biome: Tundra ),
-        ( t: 0, m: 6, biome: Tundra ),
-        ( t: 0, m: 7, biome: Tundra ),
+        ( t: 0, m: 0, biome: "tundra" ),
+        ( t: 0, m: 1, biome: "tundra" ),
+        ( t: 0, m: 2, biome: "tundra" ),
+        ( t: 0, m: 3, biome: "tundra" ),
+        ( t: 0, m: 4, biome: "tundra" ),
+        ( t: 0, m: 5, biome: "tundra" ),
+        ( t: 0, m: 6, biome: "tundra" ),
+        ( t: 0, m: 7, biome: "tundra" ),
 
         // ----------------------------------------------------------------
         // Temperature bin 1 — sub-polar  (≈ -0.30 to -0.10)
@@ -78,56 +88,56 @@
         // higher moisture levels — this is the southern edge of the taiga
         // belt where isolated conifers can survive.
         // ----------------------------------------------------------------
-        ( t: 1, m: 0, biome: Tundra ),
-        ( t: 1, m: 1, biome: Tundra ),
-        ( t: 1, m: 2, biome: Tundra ),
-        ( t: 1, m: 3, biome: Tundra ),
-        ( t: 1, m: 4, biome: BorealForest ),
-        ( t: 1, m: 5, biome: BorealForest ),
-        ( t: 1, m: 6, biome: BorealForest ),
-        ( t: 1, m: 7, biome: BorealForest ),
+        ( t: 1, m: 0, biome: "tundra" ),
+        ( t: 1, m: 1, biome: "tundra" ),
+        ( t: 1, m: 2, biome: "tundra" ),
+        ( t: 1, m: 3, biome: "tundra" ),
+        ( t: 1, m: 4, biome: "boreal_forest" ),
+        ( t: 1, m: 5, biome: "boreal_forest" ),
+        ( t: 1, m: 6, biome: "boreal_forest" ),
+        ( t: 1, m: 7, biome: "boreal_forest" ),
 
         // ----------------------------------------------------------------
         // Temperature bin 2 — cold  (≈ -0.10 to 0.10)
         // Dry cold → Tundra. Moderate moisture → Boreal. High moisture
         // → Boreal (taiga core). No temperate forest yet; too cold.
         // ----------------------------------------------------------------
-        ( t: 2, m: 0, biome: Tundra ),
-        ( t: 2, m: 1, biome: Tundra ),
-        ( t: 2, m: 2, biome: Tundra ),
-        ( t: 2, m: 3, biome: BorealForest ),
-        ( t: 2, m: 4, biome: BorealForest ),
-        ( t: 2, m: 5, biome: BorealForest ),
-        ( t: 2, m: 6, biome: BorealForest ),
-        ( t: 2, m: 7, biome: BorealForest ),
+        ( t: 2, m: 0, biome: "tundra" ),
+        ( t: 2, m: 1, biome: "tundra" ),
+        ( t: 2, m: 2, biome: "tundra" ),
+        ( t: 2, m: 3, biome: "boreal_forest" ),
+        ( t: 2, m: 4, biome: "boreal_forest" ),
+        ( t: 2, m: 5, biome: "boreal_forest" ),
+        ( t: 2, m: 6, biome: "boreal_forest" ),
+        ( t: 2, m: 7, biome: "boreal_forest" ),
 
         // ----------------------------------------------------------------
         // Temperature bin 3 — cool  (≈ 0.10 to 0.30)
         // Dry → Grassland. Moderate → Boreal transitioning to Temperate.
         // Wet → Temperate forest. This is the boreal/temperate ecotone.
         // ----------------------------------------------------------------
-        ( t: 3, m: 0, biome: Tundra ),
-        ( t: 3, m: 1, biome: Grassland ),
-        ( t: 3, m: 2, biome: Grassland ),
-        ( t: 3, m: 3, biome: Grassland ),
-        ( t: 3, m: 4, biome: BorealForest ),
-        ( t: 3, m: 5, biome: TemperateForest ),
-        ( t: 3, m: 6, biome: TemperateForest ),
-        ( t: 3, m: 7, biome: TemperateForest ),
+        ( t: 3, m: 0, biome: "tundra" ),
+        ( t: 3, m: 1, biome: "grassland" ),
+        ( t: 3, m: 2, biome: "grassland" ),
+        ( t: 3, m: 3, biome: "grassland" ),
+        ( t: 3, m: 4, biome: "boreal_forest" ),
+        ( t: 3, m: 5, biome: "temperate_forest" ),
+        ( t: 3, m: 6, biome: "temperate_forest" ),
+        ( t: 3, m: 7, biome: "temperate_forest" ),
 
         // ----------------------------------------------------------------
         // Temperature bin 4 — temperate  (≈ 0.30 to 0.50)
         // Classic Whittaker mid-latitude band. Desert at lowest moisture,
         // Grassland in the dry middle, Temperate forest when humid.
         // ----------------------------------------------------------------
-        ( t: 4, m: 0, biome: Desert ),
-        ( t: 4, m: 1, biome: Desert ),
-        ( t: 4, m: 2, biome: Grassland ),
-        ( t: 4, m: 3, biome: Grassland ),
-        ( t: 4, m: 4, biome: Grassland ),
-        ( t: 4, m: 5, biome: TemperateForest ),
-        ( t: 4, m: 6, biome: TemperateForest ),
-        ( t: 4, m: 7, biome: TemperateForest ),
+        ( t: 4, m: 0, biome: "desert" ),
+        ( t: 4, m: 1, biome: "desert" ),
+        ( t: 4, m: 2, biome: "grassland" ),
+        ( t: 4, m: 3, biome: "grassland" ),
+        ( t: 4, m: 4, biome: "grassland" ),
+        ( t: 4, m: 5, biome: "temperate_forest" ),
+        ( t: 4, m: 6, biome: "temperate_forest" ),
+        ( t: 4, m: 7, biome: "temperate_forest" ),
 
         // ----------------------------------------------------------------
         // Temperature bin 5 — warm  (≈ 0.50 to 0.65)
@@ -135,14 +145,14 @@
         // Grassland / savanna in the middle. Temperate forest in the wet
         // upper range; Tropical starts to appear at maximum moisture.
         // ----------------------------------------------------------------
-        ( t: 5, m: 0, biome: Desert ),
-        ( t: 5, m: 1, biome: Desert ),
-        ( t: 5, m: 2, biome: Desert ),
-        ( t: 5, m: 3, biome: Grassland ),
-        ( t: 5, m: 4, biome: Grassland ),
-        ( t: 5, m: 5, biome: TemperateForest ),
-        ( t: 5, m: 6, biome: TemperateForest ),
-        ( t: 5, m: 7, biome: TropicalRainforest ),
+        ( t: 5, m: 0, biome: "desert" ),
+        ( t: 5, m: 1, biome: "desert" ),
+        ( t: 5, m: 2, biome: "desert" ),
+        ( t: 5, m: 3, biome: "grassland" ),
+        ( t: 5, m: 4, biome: "grassland" ),
+        ( t: 5, m: 5, biome: "temperate_forest" ),
+        ( t: 5, m: 6, biome: "temperate_forest" ),
+        ( t: 5, m: 7, biome: "tropical_rainforest" ),
 
         // ----------------------------------------------------------------
         // Temperature bin 6 — hot  (≈ 0.65 to 0.80)
@@ -150,14 +160,14 @@
         // to Tropical at high moisture. This is the subtropical band:
         // Sahara at m=0, Sahel at m=3, Congo Basin at m=7.
         // ----------------------------------------------------------------
-        ( t: 6, m: 0, biome: Desert ),
-        ( t: 6, m: 1, biome: Desert ),
-        ( t: 6, m: 2, biome: Desert ),
-        ( t: 6, m: 3, biome: Desert ),
-        ( t: 6, m: 4, biome: Grassland ),
-        ( t: 6, m: 5, biome: Grassland ),
-        ( t: 6, m: 6, biome: TropicalRainforest ),
-        ( t: 6, m: 7, biome: TropicalRainforest ),
+        ( t: 6, m: 0, biome: "desert" ),
+        ( t: 6, m: 1, biome: "desert" ),
+        ( t: 6, m: 2, biome: "desert" ),
+        ( t: 6, m: 3, biome: "desert" ),
+        ( t: 6, m: 4, biome: "grassland" ),
+        ( t: 6, m: 5, biome: "grassland" ),
+        ( t: 6, m: 6, biome: "tropical_rainforest" ),
+        ( t: 6, m: 7, biome: "tropical_rainforest" ),
 
         // ----------------------------------------------------------------
         // Temperature bin 7 — tropical  (≈ 0.80 to 1.00)
@@ -165,14 +175,14 @@
         // Arabian Peninsula). Above that, Grassland (tropical savanna).
         // Wet tropics → Tropical Rainforest.
         // ----------------------------------------------------------------
-        ( t: 7, m: 0, biome: Desert ),
-        ( t: 7, m: 1, biome: Desert ),
-        ( t: 7, m: 2, biome: Desert ),
-        ( t: 7, m: 3, biome: Grassland ),
-        ( t: 7, m: 4, biome: Grassland ),
-        ( t: 7, m: 5, biome: TropicalRainforest ),
-        ( t: 7, m: 6, biome: TropicalRainforest ),
-        ( t: 7, m: 7, biome: TropicalRainforest ),
+        ( t: 7, m: 0, biome: "desert" ),
+        ( t: 7, m: 1, biome: "desert" ),
+        ( t: 7, m: 2, biome: "desert" ),
+        ( t: 7, m: 3, biome: "grassland" ),
+        ( t: 7, m: 4, biome: "grassland" ),
+        ( t: 7, m: 5, biome: "tropical_rainforest" ),
+        ( t: 7, m: 6, biome: "tropical_rainforest" ),
+        ( t: 7, m: 7, biome: "tropical_rainforest" ),
     ],
 
     // Hydrology override mappings.
@@ -183,13 +193,13 @@
     // is total; at 0.0, it is a no-op.
     //
     // Rationale for each override:
-    //   Desert    → Grassland : fertile strip along rivers (Nile, Euphrates).
-    //   Grassland → TemperateForest : riparian woodland along high-flow rivers.
+    //   "desert"    → "grassland"       : fertile strip along rivers (Nile, Euphrates).
+    //   "grassland" → "temperate_forest": riparian woodland along high-flow rivers.
     //
-    // Tundra and BorealForest are intentionally not overridden: arctic
+    // "tundra" and "boreal_forest" are intentionally not overridden: arctic
     // rivers do not produce warm-biome fertility strips.
     hydrology_overrides: {
-        Desert:    Grassland,
-        Grassland: TemperateForest,
+        "desert":    "grassland",
+        "grassland": "temperate_forest",
     },
 )

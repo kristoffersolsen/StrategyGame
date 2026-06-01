@@ -2,11 +2,16 @@
 
 mod camera;
 mod chunk_spawner;
+pub(crate) mod cities;
 mod feature_models;
-mod hex_mesh;
+pub(crate) mod hex_mesh;
 mod lighting;
+pub(crate) mod selection;
 mod terrain_lookup;
 mod terrain_material;
+pub(crate) mod units;
+
+pub(crate) use hex_mesh::HEX_SIZE;
 
 use bevy::{
     diagnostic::FrameTimeDiagnosticsPlugin,
@@ -16,7 +21,6 @@ use bevy::{
     },
     sprite_render::Material2dPlugin,
 };
-use worldgen::WorldParams;
 
 use crate::app_state::RenderAppState;
 
@@ -38,8 +42,6 @@ pub enum TerrainRenderer {
 /// Startup inputs for static map rendering.
 #[derive(Resource, Debug, Clone)]
 pub struct RenderStartupConfig {
-    /// World-generation parameters used to create the render test map.
-    pub world_params: WorldParams,
     /// Terrain renderer implementation to use.
     pub terrain_renderer: TerrainRenderer,
 }
@@ -47,10 +49,6 @@ pub struct RenderStartupConfig {
 impl Default for RenderStartupConfig {
     fn default() -> Self {
         Self {
-            world_params: WorldParams {
-                seed: 1,
-                ..WorldParams::default()
-            },
             terrain_renderer: TerrainRenderer::VertexColor,
         }
     }
@@ -89,8 +87,24 @@ impl Plugin for RenderingPlugin {
                     camera::spawn_map_camera,
                     lighting::spawn_lighting,
                     camera::spawn_fps_overlay,
+                    camera::spawn_coord_overlay,
+                    camera::spawn_turn_overlay,
                 )
                     .chain(),
+            )
+            // Sim startup runs before renderer-owned state transitions, so
+            // unit entities already exist by the time rendering enters Running.
+            // Unit asset handles must be inserted before model spawning reads them.
+            .add_systems(
+                OnEnter(RenderAppState::Running),
+                (units::load_unit_assets, units::spawn_unit_models).chain(),
+            )
+            // City asset handles loaded once on entering Running.
+            .add_systems(OnEnter(RenderAppState::Running), cities::load_city_assets)
+            // Selection highlight entity spawned once on entering Running.
+            .add_systems(
+                OnEnter(RenderAppState::Running),
+                selection::spawn_selection_entities,
             )
             .add_systems(
                 Update,
@@ -103,7 +117,22 @@ impl Plugin for RenderingPlugin {
             )
             .add_systems(
                 Update,
-                (camera::update_fps_overlay,).run_if(in_state(RenderAppState::Running)),
+                (
+                    camera::update_fps_overlay,
+                    camera::update_coord_overlay,
+                    camera::update_turn_overlay,
+                )
+                    .run_if(in_state(RenderAppState::Running)),
+            )
+            .add_systems(
+                Update,
+                (
+                    selection::update_selection_highlight,
+                    selection::update_reachable_overlay,
+                    units::sync_unit_positions,
+                    cities::spawn_city_on_founded,
+                )
+                    .run_if(in_state(RenderAppState::Running)),
             );
     }
 }

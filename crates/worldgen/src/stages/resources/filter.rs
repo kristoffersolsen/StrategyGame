@@ -4,12 +4,12 @@ use std::collections::BTreeMap;
 
 use coords::{Coord, MapBounds};
 
-use crate::world_data::{BiomeData, HydrologyData, ResourceId, TectonicData};
+use crate::world_data::{BiomeData, HydrologyData, ResourceHandle, TectonicData};
 
 use super::config::{ResourceConfig, ResourceEntry, TerrainFilter};
 
 /// Per-resource eligible tile lists.
-pub(super) type Eligibility = BTreeMap<ResourceId, Vec<Coord>>;
+pub(super) type Eligibility = BTreeMap<ResourceHandle, Vec<Coord>>;
 
 /// Builds eligible tile lists for every configured resource.
 pub(super) fn build_eligibility(

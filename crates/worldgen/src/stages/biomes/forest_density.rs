@@ -7,15 +7,22 @@ use noise::{NoiseFn, OpenSimplex};
 
 use crate::Field;
 use crate::params::BiomeParams;
-use crate::world_data::Biome;
+use crate::world_data::{BiomeHandle, BiomeRegistry};
 
+// TORUS_RADIUS and NOISE_Z_SCALE are geometric constants for wrapping the
+// noise field onto the toroidal map topology. They are not tuning knobs —
+// changing them would change the spatial frequency of the noise in a way
+// that is already controlled by forest_noise_frequency. They stay as
+// constants because their values encode a geometric invariant (TAU-periodic
+// wrapping), not a tuning choice.
 const TORUS_RADIUS: f64 = 1.0 / TAU;
 const NOISE_Z_SCALE: f64 = 1.0 / 150.0;
 
 /// Builds a low-frequency forest-density field masked to forest biomes.
 pub(super) fn build_forest_density(
     bounds: MapBounds,
-    biome: &Field<Option<Biome>>,
+    biome: &Field<Option<BiomeHandle>>,
+    registry: &BiomeRegistry,
     params: &BiomeParams,
     noise_seed: u32,
 ) -> Field<f32> {
@@ -25,7 +32,7 @@ pub(super) fn build_forest_density(
         let Some(tile_biome) = biome[coord] else {
             return 0.0;
         };
-        if !tile_biome.is_forest() {
+        if !registry.is_forest_biome(tile_biome) {
             return 0.0;
         }
         let sample = sample_noise(coord, width, params.forest_noise_frequency, &noise);
