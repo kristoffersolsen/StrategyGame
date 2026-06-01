@@ -9,7 +9,8 @@ use bevy::{
     render::render_resource::TextureFormat,
 };
 use coords::Coord;
-use worldgen::WorldData;
+
+use crate::sim::terrain::StaticTerrain;
 
 pub(crate) const TEXTURE_SIZE: u32 = 64;
 pub(crate) const TEXTURE_LAYER_COUNT: u32 = 18;
@@ -22,9 +23,8 @@ const MOUNTAIN: LinearRgba = hex_color(0x5a, 0x5a, 0x5a);
 const RIVER_TINT: LinearRgba = hex_color(0x2c, 0x8f, 0xd8);
 
 /// Returns the flat RGBA colour used for a tile in the P1 renderer.
-pub(crate) fn tile_color(world: &WorldData, coord: Coord, mountain_level: u8) -> [f32; 4] {
-    let height_level = *world
-        .tectonics
+pub(crate) fn tile_color(terrain: &StaticTerrain, coord: Coord) -> [f32; 4] {
+    let height_level = *terrain
         .height_level
         .get(coord)
         .expect("rendered coord must be in bounds");
@@ -32,32 +32,19 @@ pub(crate) fn tile_color(world: &WorldData, coord: Coord, mountain_level: u8) ->
     let mut color = match height_level {
         0 => OCEAN,
         1 => COAST,
-        level if level >= mountain_level => MOUNTAIN,
+        level if level >= terrain.mountain_level => MOUNTAIN,
         _ => {
-            let biome_handle = world.biomes.biome.get(coord).copied().flatten();
-            let biome_id = biome_handle.map(|h| world.biome_registry.id_of(h));
+            let biome_handle = terrain.biome.get(coord).copied().flatten();
+            let biome_id = biome_handle.map(|h| terrain.biome_registry.id_of(h));
             let mut color = biome_id.map_or(hex_color(0x7a, 0x9a, 0x3a), biome_color);
-            if world
-                .tectonics
-                .is_hilly
-                .get(coord)
-                .copied()
-                .unwrap_or(false)
-            {
+            if terrain.is_hilly.get(coord).copied().unwrap_or(false) {
                 color = darken(color, 0.85);
             }
             color
         }
     };
 
-    if world
-        .hydrology
-        .river_size
-        .get(coord)
-        .copied()
-        .flatten()
-        .is_some()
-    {
+    if *terrain.has_river.get(coord).unwrap_or(&false) {
         color = mix(color, RIVER_TINT, 0.25);
     }
 
@@ -65,9 +52,8 @@ pub(crate) fn tile_color(world: &WorldData, coord: Coord, mountain_level: u8) ->
 }
 
 /// Returns the P2 texture-array layer index used for a tile.
-pub(crate) fn texture_index(world: &WorldData, coord: Coord, mountain_level: u8) -> u32 {
-    let height_level = *world
-        .tectonics
+pub(crate) fn texture_index(terrain: &StaticTerrain, coord: Coord) -> u32 {
+    let height_level = *terrain
         .height_level
         .get(coord)
         .expect("rendered coord must be in bounds");
@@ -75,21 +61,21 @@ pub(crate) fn texture_index(world: &WorldData, coord: Coord, mountain_level: u8)
     match height_level {
         0 => 0,
         1 => 1,
-        level if level >= mountain_level => {
-            if is_hilly(world, coord) {
+        level if level >= terrain.mountain_level => {
+            if is_hilly(terrain, coord) {
                 17
             } else {
                 8
             }
         }
         _ => {
-            let biome_handle = world.biomes.biome.get(coord).copied().flatten();
-            let grassland_handle = world.biome_registry.resolve("grassland");
+            let biome_handle = terrain.biome.get(coord).copied().flatten();
+            let grassland_handle = terrain.biome_registry.resolve("grassland");
             let effective_handle = biome_handle.or(grassland_handle);
-            let biome_id = effective_handle.map_or("grassland", |h| world.biome_registry.id_of(h));
+            let biome_id =
+                effective_handle.map_or("grassland", |h| terrain.biome_registry.id_of(h));
             let base = biome_texture_index(biome_id);
-
-            if is_hilly(world, coord) {
+            if is_hilly(terrain, coord) {
                 base + 9
             } else {
                 base
@@ -99,9 +85,8 @@ pub(crate) fn texture_index(world: &WorldData, coord: Coord, mountain_level: u8)
 }
 
 /// Returns the P3 authored texture-array layer index used for a tile top.
-pub(crate) fn p3_texture_index(world: &WorldData, coord: Coord, mountain_level: u8) -> u32 {
-    let height_level = *world
-        .tectonics
+pub(crate) fn p3_texture_index(terrain: &StaticTerrain, coord: Coord) -> u32 {
+    let height_level = *terrain
         .height_level
         .get(coord)
         .expect("rendered coord must be in bounds");
@@ -109,15 +94,15 @@ pub(crate) fn p3_texture_index(world: &WorldData, coord: Coord, mountain_level: 
     match height_level {
         0 => 0,
         1 => 1,
-        level if level >= mountain_level => 8,
+        level if level >= terrain.mountain_level => 8,
         _ => {
-            let biome_handle = world.biomes.biome.get(coord).copied().flatten();
-            let grassland_handle = world.biome_registry.resolve("grassland");
+            let biome_handle = terrain.biome.get(coord).copied().flatten();
+            let grassland_handle = terrain.biome_registry.resolve("grassland");
             let effective_handle = biome_handle.or(grassland_handle);
-            let biome_id = effective_handle.map_or("grassland", |h| world.biome_registry.id_of(h));
+            let biome_id =
+                effective_handle.map_or("grassland", |h| terrain.biome_registry.id_of(h));
             let base = biome_texture_index(biome_id);
-
-            if is_hilly(world, coord) {
+            if is_hilly(terrain, coord) {
                 base + 9
             } else {
                 base
@@ -202,13 +187,8 @@ pub(crate) fn p3_texture_array_data() -> Vec<u8> {
     data
 }
 
-fn is_hilly(world: &WorldData, coord: Coord) -> bool {
-    world
-        .tectonics
-        .is_hilly
-        .get(coord)
-        .copied()
-        .unwrap_or(false)
+fn is_hilly(terrain: &StaticTerrain, coord: Coord) -> bool {
+    terrain.is_hilly.get(coord).copied().unwrap_or(false)
 }
 
 fn biome_color(id: &str) -> LinearRgba {

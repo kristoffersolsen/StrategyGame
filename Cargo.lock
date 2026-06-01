@@ -2686,7 +2686,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bevy",
+ "content",
  "coords",
+ "ron",
+ "serde",
  "tracing",
  "tracing-subscriber",
  "worldgen",

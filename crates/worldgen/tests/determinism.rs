@@ -61,7 +61,7 @@ fn test_params(seed: u64) -> WorldParams {
 fn world_data_hash(params: &WorldParams) -> blake3::Hash {
     let world = generate_world(params).expect("generate_world failed");
     let mut hasher = Hasher::new();
-    hasher.update(b"WorldData:v6");
+    hasher.update(b"WorldData:v7");
     hasher.update(&world.bounds.width().to_le_bytes());
     hasher.update(&world.bounds.height().to_le_bytes());
 
@@ -124,6 +124,13 @@ fn world_data_hash(params: &WorldParams) -> blake3::Hash {
     for &resource in world.resources.resource.as_slice() {
         update_u8(&mut hasher, resource_tag(resource));
     }
+
+    update_len(&mut hasher, world.starting_positions.start_positions.len());
+    for &coord in &world.starting_positions.start_positions {
+        update_i32(&mut hasher, coord.q);
+        update_i32(&mut hasher, coord.r);
+    }
+    update_f32_field(&mut hasher, &world.starting_positions.viability);
 
     hasher.finalize()
 }
@@ -360,11 +367,10 @@ mod reference_hash {
     /// seed `0xDEAD_BEEF` on a `Small` map.
     ///
     /// This value must be updated whenever generation output changes
-    /// intentionally. Version v6: converted Biome/ResourceId enums to
-    /// registry handles (Stage 3.7). The hash value is stable because
-    /// handle assignment is alphabetical and deterministic.
+    /// intentionally. Version v7: Stage 3.6 starting position selection
+    /// added; `start_positions` and viability field included in the hash.
     const REFERENCE_WORLD_DATA_HASH: &str =
-        "82e257a5932ead19e41afdb18129e8f705ce24c7e09ae0483aada85099cba45b";
+        "5d52727d9b19f036bd29dae0f820c20954cc47bbbc8e48cd8e3d9795b7dcef86";
 
     #[test]
     fn world_data_matches_committed_reference_hash() {
@@ -381,6 +387,77 @@ mod reference_hash {
             "WorldData hash changed — if intentional, update \
              REFERENCE_WORLD_DATA_HASH and commit alongside the change"
         );
+    }
+}
+
+// ------------- Starting position invariants -------------
+
+mod starting_positions {
+    use super::*;
+
+    /// Gate requirement: adequacy floor holds across at least 20 seeds.
+    ///
+    /// Every generated world must have exactly `player_count` start
+    /// positions and all must be on valid (biome-carrying) land tiles.
+    #[test]
+    fn adequacy_floor_holds_across_twenty_seeds() {
+        for seed in 1..=20 {
+            let params = test_params(seed);
+            let world = generate_world(&params)
+                .unwrap_or_else(|e| panic!("seed {seed}: generate_world failed: {e}"));
+            let expected = params.advanced.player_count as usize;
+            let actual = world.starting_positions.start_positions.len();
+            assert_eq!(
+                actual, expected,
+                "seed {seed}: expected {expected} start positions, got {actual}"
+            );
+        }
+    }
+
+    /// Gate requirement: spacing constraint satisfied across the same seed set.
+    #[test]
+    fn spacing_constraint_satisfied_across_twenty_seeds() {
+        for seed in 1..=20 {
+            let params = test_params(seed);
+            let world = generate_world(&params)
+                .unwrap_or_else(|e| panic!("seed {seed}: generate_world failed: {e}"));
+            let min_spacing = params.tuning.starting_positions.min_spacing.cast_signed();
+            let positions = &world.starting_positions.start_positions;
+            for (i, &a) in positions.iter().enumerate() {
+                for &b in &positions[i + 1..] {
+                    let dist = world.bounds.distance(a, b);
+                    assert!(
+                        dist >= min_spacing,
+                        "seed {seed}: positions {a} and {b} are only {dist} steps apart \
+                         (min_spacing = {min_spacing})"
+                    );
+                }
+            }
+        }
+    }
+
+    /// All selected positions must carry a biome (no ocean/mountain starts).
+    #[test]
+    fn all_start_positions_are_on_biome_tiles() {
+        for seed in 1..=10 {
+            let params = test_params(seed);
+            let world = generate_world(&params)
+                .unwrap_or_else(|e| panic!("seed {seed}: generate_world failed: {e}"));
+            for &coord in &world.starting_positions.start_positions {
+                assert!(
+                    world.biomes.biome[coord].is_some(),
+                    "seed {seed}: start position {coord} has no biome"
+                );
+                assert!(
+                    !world.hydrology.is_lake[coord],
+                    "seed {seed}: start position {coord} is a lake tile"
+                );
+                assert!(
+                    world.tectonics.height_level[coord] > 1,
+                    "seed {seed}: start position {coord} is ocean or coast"
+                );
+            }
+        }
     }
 }
 

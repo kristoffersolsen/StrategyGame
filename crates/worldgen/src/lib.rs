@@ -1,9 +1,9 @@
 //! Procedural world generation pipeline.
 //!
 //! Transforms a seed and a [`WorldParams`] configuration into a complete
-//! [`WorldData`] structure describing a generated map. The current pipeline
-//! runs five implemented stages: tectonics, climate, hydrology, biomes,
-//! and resources. Starting position selection is planned as Stage 3.6.
+//! [`WorldData`] structure describing a generated map. The pipeline runs
+//! six stages: tectonics, climate, hydrology, biomes, resources, and
+//! starting position selection.
 //!
 //! This crate has no dependency on Bevy and can be run standalone via the
 //! `mapdump` CLI tool. All output is deterministic — the same seed and
@@ -39,9 +39,8 @@
 //!     ├─ climate              (stage 3.2, design §1.10)
 //!     ├─ hydrology            (stage 3.3, design §1.11)
 //!     ├─ biomes               (stage 3.4, design §1.12)
-//!     └─ resources            (stage 3.5, design §1.13)
-//!
-//! Planned next stage: starting positions (stage 3.6, design §1.14).
+//!     ├─ resources            (stage 3.5, design §1.13)
+//!     └─ starting positions   (stage 3.6, design §1.14)
 //! ```
 //!
 //! Each stage takes the prior stages' output and contributes its own
@@ -64,12 +63,13 @@ pub use params::{
     AdvancedParams, BasicParams, BiomeParams, CFL_MAX_WIND_AMPLITUDE, ClimateBand, ClimateParams,
     HydrologyParams, MAX_DETAIL_NOISE_OCTAVES, MAX_LAND_LEVEL_COUNT, MAX_TARGET_PLATE_COUNT,
     MIN_DETAIL_NOISE_OCTAVES, MIN_LAND_LEVEL_COUNT, MIN_TARGET_PLATE_COUNT, MapArchetype, MapSize,
-    ResourceAbundance, ResourceParams, TectonicsParams, TuningParams, WorldAge, WorldParams,
+    ResourceAbundance, ResourceParams, StartingPositionParams, TectonicsParams, TuningParams,
+    WorldAge, WorldParams,
 };
 pub use world_data::{
     BiomeData, BiomeHandle, BiomeRegistry, BoundaryType, ClimateData, Handle, HydrologyData,
     MineralCharacter, MotionVector, Plate, PlateId, PlateType, ResourceCategory, ResourceData,
-    ResourceHandle, ResourceRegistry, RiverSize, TectonicData, WorldData,
+    ResourceHandle, ResourceRegistry, RiverSize, StartingPositionData, TectonicData, WorldData,
 };
 
 use coords::MapBounds;
@@ -162,6 +162,20 @@ pub fn generate_world(params: &WorldParams) -> Result<WorldData, GenerationError
         params.advanced.resource_abundance,
         &mut resource_rng,
     );
+
+    // Stage 3.6: starting positions.
+    let mut start_rng = master.fork(StageId::StartingPositions);
+    world.starting_positions = stages::starting_positions::run(
+        &stages::starting_positions::StartingPositionInputs {
+            tectonics: &world.tectonics,
+            hydrology: &world.hydrology,
+            biomes: &world.biomes,
+            biome_registry: &world.biome_registry,
+        },
+        &params.tuning.starting_positions,
+        params.advanced.player_count,
+        &mut start_rng,
+    )?;
 
     Ok(world)
 }

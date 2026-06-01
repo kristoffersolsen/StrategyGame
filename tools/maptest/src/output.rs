@@ -15,7 +15,7 @@ use anyhow::{Context, Result};
 use tracing::info;
 use worldgen::{
     BiomeData, BoundaryType, ClimateData, Direction, Field, HydrologyData, ResourceData, RiverSize,
-    TectonicData, WorldData,
+    StartingPositionData, TectonicData, WorldData,
     debug_viz::{
         BiomeCmap, BoundaryCmap, Categorical, Colormap, Grayscale, HeightLevelCmap, ResourceCmap,
         Viridis, biome_handle_to_f32, dump_field_hex, dump_field_pixels,
@@ -57,6 +57,8 @@ pub(crate) const SUBDIR_RESOURCE_WINE: &str = "resource_wine";
 pub(crate) const SUBDIR_RESOURCE_WHEAT: &str = "resource_wheat";
 pub(crate) const SUBDIR_RESOURCE_FISH: &str = "resource_fish";
 pub(crate) const SUBDIR_RESOURCE_STONE: &str = "resource_stone";
+pub(crate) const SUBDIR_VIABILITY: &str = "viability";
+pub(crate) const SUBDIR_START_POSITIONS: &str = "start_positions";
 
 pub(crate) const ALL_SUBDIRS: &[&str] = &[
     SUBDIR_SEEDS,
@@ -91,6 +93,8 @@ pub(crate) const ALL_SUBDIRS: &[&str] = &[
     SUBDIR_RESOURCE_WHEAT,
     SUBDIR_RESOURCE_FISH,
     SUBDIR_RESOURCE_STONE,
+    SUBDIR_VIABILITY,
+    SUBDIR_START_POSITIONS,
 ];
 
 // ------------- Directory preparation -------------
@@ -166,10 +170,19 @@ pub(crate) fn write_world_outputs(
     write_biomes(biomes, base_dir, label, hex_size, world)?;
     write_forest_density(biomes, base_dir, label)?;
     write_resources(resources, base_dir, label, hex_size, world)?;
+    write_viability(&world.starting_positions, base_dir, label, hex_size)?;
+    write_start_positions(
+        &world.starting_positions,
+        tectonics,
+        base_dir,
+        label,
+        land_level_count,
+    )?;
     log_climate_stats(tectonics, climate);
     log_hydrology_stats(hydrology);
     log_biome_stats(biomes, world);
     log_resource_stats(resources, world);
+    log_starting_position_stats(&world.starting_positions, world);
     Ok(())
 }
 
@@ -705,6 +718,95 @@ fn resource_subdir_for_id(id: &str) -> &str {
     }
 }
 
+// ------------- Per-output helpers (starting positions) -------------
+
+fn write_viability(
+    starting_positions: &StartingPositionData,
+    base_dir: &Path,
+    label: &str,
+    hex_size: u32,
+) -> Result<()> {
+    let max_viability = starting_positions
+        .viability
+        .iter()
+        .copied()
+        .fold(0.0_f32, f32::max);
+
+    let to_f32 = move |v: f32| {
+        if max_viability > 0.0 {
+            v / max_viability
+        } else {
+            0.0
+        }
+    };
+
+    let path = base_dir.join(SUBDIR_VIABILITY).join(format!("{label}.png"));
+    dump_field_hex(
+        &starting_positions.viability,
+        &path,
+        to_f32,
+        &Viridis,
+        hex_size,
+    )
+    .with_context(|| format!("failed to write {}", path.display()))
+}
+
+fn write_start_positions(
+    starting_positions: &StartingPositionData,
+    tectonics: &TectonicData,
+    base_dir: &Path,
+    label: &str,
+    land_level_count: u8,
+) -> Result<()> {
+    let path = base_dir
+        .join(SUBDIR_START_POSITIONS)
+        .join(format!("{label}.png"));
+    dump_field_with_seed_overlay(
+        &tectonics.height_level,
+        &starting_positions.start_positions,
+        &path,
+        |&v| f32::from(v),
+        &HeightLevelCmap { land_level_count },
+        START_POSITION_COLOR,
+    )
+    .with_context(|| format!("failed to write {}", path.display()))
+}
+
+// Tile counts fit comfortably in f32 (max ~2 million for a huge map).
+#[allow(clippy::cast_precision_loss)]
+fn log_starting_position_stats(starting_positions: &StartingPositionData, world: &WorldData) {
+    let count = starting_positions.start_positions.len();
+    let max_viability = starting_positions
+        .viability
+        .iter()
+        .copied()
+        .fold(0.0_f32, f32::max);
+    let eligible_count = starting_positions
+        .viability
+        .iter()
+        .filter(|&&v| v > 0.0)
+        .count();
+
+    info!(
+        count,
+        max_viability, eligible_count, "starting position stats"
+    );
+
+    for (i, &coord) in starting_positions.start_positions.iter().enumerate() {
+        let biome_id = world.biomes.biome[coord].map_or("none", |h| world.biome_registry.id_of(h));
+        let viability = starting_positions.viability[coord];
+        info!(
+            player = i,
+            q = coord.q,
+            r = coord.r,
+            biome = %biome_id,
+            viability,
+            "start position"
+        );
+    }
+}
+
+const START_POSITION_COLOR: [u8; 3] = [255, 255, 0]; // bright yellow
 const LAKE_COLOR: [u8; 3] = [0, 170, 170];
 const RIVER_COLOR: [u8; 3] = [255, 105, 180];
 const MAJOR_RIVER_COLOR: [u8; 3] = [130, 70, 210];

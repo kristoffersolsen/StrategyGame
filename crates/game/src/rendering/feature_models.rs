@@ -5,11 +5,11 @@ use bevy::{
     gltf::GltfAssetLabel,
     prelude::{Commands, Handle, Quat, Resource, Scene, SceneRoot, Transform, Vec3},
 };
-use coords::{Coord, MapBounds};
+use coords::Coord;
 use tracing::info;
-use worldgen::WorldData;
 
 use crate::rendering::hex_mesh::{HEX_SIZE, tile_center_position};
+use crate::sim::terrain::StaticTerrain;
 
 const FOREST_THRESHOLD: f32 = 0.45;
 const TREE_SCALE: f32 = 8.0;
@@ -142,27 +142,26 @@ impl FeatureModelAssets {
 pub(crate) fn spawn_feature_models(
     commands: &mut Commands,
     assets: &FeatureModelAssets,
-    world: &WorldData,
-    bounds: MapBounds,
+    terrain: &StaticTerrain,
 ) -> FeatureSpawnCounts {
     let mut counts = FeatureSpawnCounts {
         trees: 0,
         resources: 0,
     };
 
-    for (coord, density) in world.biomes.forest_density.iter_coords() {
+    for (coord, density) in terrain.forest_density.iter_coords() {
         if *density <= FOREST_THRESHOLD {
             continue;
         }
-        let Some(biome_handle) = world.biomes.biome.get(coord).copied().flatten() else {
+        let Some(biome_handle) = terrain.biome.get(coord).copied().flatten() else {
             continue;
         };
-        let biome_id = world.biome_registry.id_of(biome_handle);
+        let biome_id = terrain.biome_registry.id_of(biome_handle);
         let Some(pool) = assets.tree_pool(biome_id) else {
             continue;
         };
         let model = select_handle(pool, coord, 0xA53D_91F2);
-        let [x, y, z] = tile_center_position(world, bounds, coord);
+        let [x, y, z] = tile_center_position(terrain, coord);
         let jitter = jitter_offset(coord);
         commands.spawn((
             SceneRoot(model.clone()),
@@ -174,17 +173,17 @@ pub(crate) fn spawn_feature_models(
     }
 
     // Resolve the fish handle once so we can check for water placement.
-    let fish_handle = world.resource_registry.resolve("fish");
+    let fish_handle = terrain.resource_registry.resolve("fish");
 
-    for (coord, resource) in world.resources.resource.iter_coords() {
+    for (coord, resource) in terrain.resource.iter_coords() {
         let Some(resource_handle) = *resource else {
             continue;
         };
-        let resource_id = world.resource_registry.id_of(resource_handle);
+        let resource_id = terrain.resource_registry.id_of(resource_handle);
         let Some(model) = assets.resource_model(resource_id) else {
             continue;
         };
-        let [x, y, terrain_z] = tile_center_position(world, bounds, coord);
+        let [x, y, terrain_z] = tile_center_position(terrain, coord);
         let z = if Some(resource_handle) == fish_handle {
             FISH_Z
         } else {

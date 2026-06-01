@@ -576,6 +576,36 @@ impl ResourceData {
     }
 }
 
+// ------------- Starting position sub-structure -------------
+
+/// Data produced by the starting position selection stage (Stage 3.6, design §1.14).
+///
+/// `start_positions` is the authoritative output consumed by the game crate.
+/// `viability` is the per-tile neighbourhood yield sum used to rank candidates;
+/// it is retained here for debug visualisation.
+#[derive(Debug, Clone)]
+pub struct StartingPositionData {
+    /// Selected start coordinates, one per player, in descending viability order.
+    pub start_positions: Vec<Coord>,
+
+    /// Per-tile viability score: sum of yield proxies over the neighbourhood
+    /// configured by [`crate::params::StartingPositionParams::neighborhood_radius`].
+    ///
+    /// Non-land tiles (ocean, coast, mountain, lake) receive `0.0`.
+    pub viability: Field<f32>,
+}
+
+impl StartingPositionData {
+    /// Constructs an empty [`StartingPositionData`] for the given map bounds.
+    #[must_use]
+    pub fn empty(bounds: MapBounds) -> Self {
+        Self {
+            start_positions: Vec::new(),
+            viability: Field::filled(bounds, 0.0),
+        }
+    }
+}
+
 // ------------- Top-level output -------------
 
 /// The finalized output of the generation pipeline, consumed by the
@@ -588,7 +618,7 @@ impl ResourceData {
 /// - Stage 3.3 (hydrology) → [`HydrologyData`]
 /// - Stage 3.4 (biomes) → [`BiomeData`]
 /// - Stage 3.5 (resources) → [`ResourceData`]
-/// - Stage 3.6 (starting positions) → `Vec<Coord>` (not yet added)
+/// - Stage 3.6 (starting positions) → [`StartingPositionData`]
 ///
 /// See `documents/planning/implementation-plan.md` §3 for the full list.
 #[derive(Debug, Clone)]
@@ -618,6 +648,9 @@ pub struct WorldData {
 
     /// Output of the resource placement stage (design §1.13).
     pub resources: ResourceData,
+
+    /// Output of the starting position selection stage (design §1.14).
+    pub starting_positions: StartingPositionData,
 }
 
 impl WorldData {
@@ -638,6 +671,7 @@ impl WorldData {
             hydrology: HydrologyData::empty(bounds),
             biomes: BiomeData::empty(bounds),
             resources: ResourceData::empty(bounds),
+            starting_positions: StartingPositionData::empty(bounds),
         }
     }
 }

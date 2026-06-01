@@ -65,6 +65,12 @@
 //!
 //! - `35_01_resources_hex.png` — categorical combined resource map.
 //! - `35_02_resource_<name>_px.png` — binary overlay for each resource.
+//!
+//! ## Stage 3.6 — Starting positions
+//!
+//! - `36_01_viability_hex.png` — neighbourhood yield sum (Viridis).
+//! - `36_02_start_positions_px.png` — height level with selected start
+//!   positions marked in yellow.
 
 use std::path::Path;
 use std::path::PathBuf;
@@ -74,7 +80,8 @@ use clap::{Parser, ValueEnum};
 use tracing::info;
 use worldgen::{
     BasicParams, BiomeData, BoundaryType, ClimateData, Direction, Field, HydrologyData, MapSize,
-    ResourceData, RiverSize, TectonicData, TuningParams, WorldData, WorldParams,
+    ResourceData, RiverSize, StartingPositionData, TectonicData, TuningParams, WorldData,
+    WorldParams,
     debug_viz::{
         BiomeCmap, BoundaryCmap, Categorical, Colormap, Grayscale, HeightLevelCmap, ResourceCmap,
         Viridis, biome_handle_to_f32, dump_field_hex, dump_field_pixels,
@@ -143,6 +150,13 @@ fn main() -> Result<()> {
     )?;
     write_biomes(&world.biomes, &args.output, args.hex_size, &world)?;
     write_resources(&world.resources, &args.output, args.hex_size, &world)?;
+    write_starting_positions(
+        &world.starting_positions,
+        &world.tectonics,
+        &args.output,
+        args.hex_size,
+        &params,
+    )?;
 
     info!("done");
     Ok(())
@@ -695,6 +709,61 @@ fn write_resources(
     Ok(())
 }
 
+// ------------- Output helpers (starting positions) -------------
+
+fn write_starting_positions(
+    starting_positions: &StartingPositionData,
+    tectonics: &TectonicData,
+    output: &Path,
+    hex_size: u32,
+    params: &WorldParams,
+) -> Result<()> {
+    let max_viability = starting_positions
+        .viability
+        .iter()
+        .copied()
+        .fold(0.0_f32, f32::max);
+
+    let to_f32 = move |v: f32| {
+        if max_viability > 0.0 {
+            v / max_viability
+        } else {
+            0.0
+        }
+    };
+
+    let viability_path = output.join("36_01_viability_hex.png");
+    info!(path = %viability_path.display(), "writing viability hex PNG");
+    dump_field_hex(
+        &starting_positions.viability,
+        &viability_path,
+        to_f32,
+        &Viridis,
+        hex_size,
+    )
+    .with_context(|| format!("failed to write {}", viability_path.display()))?;
+
+    let n = starting_positions.start_positions.len();
+    info!(count = n, "start positions selected");
+
+    let starts_path = output.join("36_02_start_positions_px.png");
+    info!(path = %starts_path.display(), "writing start positions PNG");
+    dump_field_with_seed_overlay(
+        &tectonics.height_level,
+        &starting_positions.start_positions,
+        &starts_path,
+        |&v| f32::from(v),
+        &HeightLevelCmap {
+            land_level_count: params.tuning.tectonics.land_level_count,
+        },
+        START_POSITION_COLOR,
+    )
+    .with_context(|| format!("failed to write {}", starts_path.display()))?;
+
+    Ok(())
+}
+
+const START_POSITION_COLOR: [u8; 3] = [255, 255, 0]; // bright yellow
 const LAKE_COLOR: [u8; 3] = [0, 170, 170];
 const RIVER_COLOR: [u8; 3] = [255, 105, 180];
 const MAJOR_RIVER_COLOR: [u8; 3] = [130, 70, 210];

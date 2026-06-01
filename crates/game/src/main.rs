@@ -9,16 +9,25 @@
 //! driven world creation exists.
 
 use bevy::{asset::AssetPlugin, prelude::*};
-use game::rendering::{RenderStartupConfig, RenderingPlugin};
+use game::{
+    input::InputPlugin,
+    rendering::{RenderStartupConfig, RenderingPlugin, TerrainRenderer},
+    sim::{SimPlugin, SimStartupConfig},
+};
 
 fn main() {
     App::new()
-        .insert_resource(RenderStartupConfig::default())
+        .insert_resource(SimStartupConfig::default())
+        .insert_resource(RenderStartupConfig {
+            terrain_renderer: TerrainRenderer::Terrain3d,
+        })
         .add_plugins(DefaultPlugins.set(AssetPlugin {
             file_path: workspace_asset_path(),
             ..Default::default()
         }))
+        .add_plugins(SimPlugin)
         .add_plugins(RenderingPlugin)
+        .add_plugins(InputPlugin)
         .run();
 }
 

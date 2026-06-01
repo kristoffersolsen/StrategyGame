@@ -508,6 +508,8 @@ Specific resource list is content/balance data, expected to evolve.
 
 **Output:** N starting positions for N players. Audit-added resources (if any) merged into final resource layer.
 
+**Implementation status (Stage 3.6):** The minimal implementation (viability scoring + greedy selection with spacing) is complete. The audit/rebalancing pass (step 5 above) and the luxury/strategic resource adequacy requirements are **deliberately deferred**. The implemented floor uses a neighbourhood yield-proxy sum (biome food + production, freshwater bonus, hilly bonus) without the full adequacy checklist. The audit pass requires a design decision on acceptable injection rate and resource placement rules that are blocked on open economy design (§5.3). Deferral is deliberate: the hard floor prevents inadequate starts; the audit adds edge-case robustness that is not required for the first playable iteration.
+
 ---
 
 ## 1.15 Player Control: Three-Layer Parameter Exposure

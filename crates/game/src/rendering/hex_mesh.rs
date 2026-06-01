@@ -9,9 +9,9 @@ use bevy::{
     render::render_resource::{PrimitiveTopology, VertexFormat},
 };
 use coords::{Coord, Direction, MapBounds};
-use worldgen::WorldData;
 
 use crate::rendering::terrain_lookup;
+use crate::sim::terrain::StaticTerrain;
 
 /// Tile count per chunk side. A chunk covers `CHUNK_SIZE x CHUNK_SIZE` tiles.
 ///
@@ -35,11 +35,8 @@ pub(crate) const ATTRIBUTE_TEXTURE_INDEX: MeshVertexAttribute =
     MeshVertexAttribute::new("TerrainTextureIndex", 98_754_091_700, VertexFormat::Uint32);
 
 /// Builds a static vertex-colour mesh for one terrain chunk.
-pub(crate) fn build_vertex_color_chunk_mesh(
-    chunk_origin: Coord,
-    bounds: MapBounds,
-    world: &WorldData,
-) -> Mesh {
+pub(crate) fn build_vertex_color_chunk_mesh(chunk_origin: Coord, terrain: &StaticTerrain) -> Mesh {
+    let bounds = terrain.bounds;
     let max_q = (chunk_origin.q + CHUNK_SIZE.cast_signed()).min(bounds.width().cast_signed());
     let max_r = (chunk_origin.r + CHUNK_SIZE.cast_signed()).min(bounds.height().cast_signed());
     let tile_count = usize::try_from((max_q - chunk_origin.q) * (max_r - chunk_origin.r))
@@ -49,7 +46,6 @@ pub(crate) fn build_vertex_color_chunk_mesh(
     let mut normals = Vec::with_capacity(tile_count * 7);
     let mut colors = Vec::with_capacity(tile_count * 7);
     let mut indices = Vec::with_capacity(tile_count * 18);
-    let mountain_level = mountain_level(world);
 
     for r in chunk_origin.r..max_r {
         for q in chunk_origin.q..max_q {
@@ -59,7 +55,7 @@ pub(crate) fn build_vertex_color_chunk_mesh(
             push_hex(
                 coord,
                 bounds,
-                terrain_lookup::tile_color(world, coord, mountain_level),
+                terrain_lookup::tile_color(terrain, coord),
                 &mut positions,
                 &mut normals,
                 &mut colors,
@@ -80,29 +76,21 @@ pub(crate) fn build_vertex_color_chunk_mesh(
 }
 
 /// Builds a static texture-array mesh for one terrain chunk.
-pub(crate) fn build_texture_chunk_mesh(
-    chunk_origin: Coord,
-    bounds: MapBounds,
-    world: &WorldData,
-) -> Mesh {
+pub(crate) fn build_texture_chunk_mesh(chunk_origin: Coord, terrain: &StaticTerrain) -> Mesh {
+    let bounds = terrain.bounds;
     let max_q = (chunk_origin.q + CHUNK_SIZE.cast_signed()).min(bounds.width().cast_signed());
     let max_r = (chunk_origin.r + CHUNK_SIZE.cast_signed()).min(bounds.height().cast_signed());
     let tile_count = usize::try_from((max_q - chunk_origin.q) * (max_r - chunk_origin.r))
         .expect("chunk tile count must be non-negative");
 
     let mut mesh_data = TexturedMeshData::with_capacity(tile_count);
-    let mountain_level = mountain_level(world);
 
     for r in chunk_origin.r..max_r {
         for q in chunk_origin.q..max_q {
             let coord = bounds
                 .normalize(Coord::new(q, r))
                 .expect("chunk iteration keeps r in bounds");
-            mesh_data.push_hex(
-                coord,
-                bounds,
-                terrain_lookup::texture_index(world, coord, mountain_level),
-            );
+            mesh_data.push_hex(coord, bounds, terrain_lookup::texture_index(terrain, coord));
         }
     }
 
@@ -110,35 +98,29 @@ pub(crate) fn build_texture_chunk_mesh(
 }
 
 /// Builds a static P3 terrain mesh with elevation, side faces, and mountain peaks.
-pub(crate) fn build_terrain_3d_chunk_mesh(
-    chunk_origin: Coord,
-    bounds: MapBounds,
-    world: &WorldData,
-) -> Mesh {
+pub(crate) fn build_terrain_3d_chunk_mesh(chunk_origin: Coord, terrain: &StaticTerrain) -> Mesh {
+    let bounds = terrain.bounds;
     let max_q = (chunk_origin.q + CHUNK_SIZE.cast_signed()).min(bounds.width().cast_signed());
     let max_r = (chunk_origin.r + CHUNK_SIZE.cast_signed()).min(bounds.height().cast_signed());
     let tile_count = usize::try_from((max_q - chunk_origin.q) * (max_r - chunk_origin.r))
         .expect("chunk tile count must be non-negative");
 
     let mut mesh_data = Terrain3dMeshData::with_capacity(tile_count);
-    let mountain_level = mountain_level(world);
 
     for r in chunk_origin.r..max_r {
         for q in chunk_origin.q..max_q {
             let coord = bounds
                 .normalize(Coord::new(q, r))
                 .expect("chunk iteration keeps r in bounds");
-            let surface = terrain_surface(world, coord, mountain_level);
-            let texture_index = terrain_lookup::p3_texture_index(world, coord, mountain_level);
-            let is_mountain = is_mountain(world, coord, mountain_level);
+            let surface = terrain_surface(terrain, coord);
+            let texture_index = terrain_lookup::p3_texture_index(terrain, coord);
+            let is_mtn = is_mountain(terrain, coord);
 
-            mesh_data.push_top(coord, bounds, surface, texture_index, is_mountain);
+            mesh_data.push_top(coord, bounds, surface, texture_index, is_mtn);
             for direction in Direction::ALL {
                 let neighbor_surface = bounds
                     .neighbor(coord, direction)
-                    .map_or(OCEAN_HEIGHT, |neighbor| {
-                        terrain_surface(world, neighbor, mountain_level)
-                    });
+                    .map_or(OCEAN_HEIGHT, |neighbor| terrain_surface(terrain, neighbor));
                 if neighbor_surface < surface {
                     mesh_data.push_side(
                         coord,
@@ -188,11 +170,10 @@ pub(crate) fn map_world_size(bounds: MapBounds) -> (f32, f32) {
 }
 
 /// Returns the center point where a feature model should stand on a tile.
-pub(crate) fn tile_center_position(world: &WorldData, bounds: MapBounds, coord: Coord) -> [f32; 3] {
-    let mountain_level = mountain_level(world);
-    let center = hex_center(coord, bounds);
-    let surface = terrain_surface(world, coord, mountain_level);
-    let z = if is_mountain(world, coord, mountain_level) {
+pub(crate) fn tile_center_position(terrain: &StaticTerrain, coord: Coord) -> [f32; 3] {
+    let center = hex_center(coord, terrain.bounds);
+    let surface = terrain_surface(terrain, coord);
+    let z = if is_mountain(terrain, coord) {
         surface + MOUNTAIN_PEAK_OFFSET
     } else {
         surface
@@ -416,7 +397,9 @@ fn hex_center(coord: Coord, bounds: MapBounds) -> [f32; 2] {
     ]
 }
 
-const CORNER_ANGLES: [f32; 6] = [
+/// Corner angles (radians) for a pointy-top hexagon, used by mesh builders
+/// and the selection overlay renderer.
+pub(crate) const CORNER_ANGLES: [f32; 6] = [
     PI / 6.0,
     PI / 2.0,
     5.0 * PI / 6.0,
@@ -435,19 +418,8 @@ fn i32_to_f32(value: i32) -> f32 {
     value as f32
 }
 
-fn mountain_level(world: &WorldData) -> u8 {
-    world
-        .tectonics
-        .height_level
-        .iter()
-        .copied()
-        .max()
-        .unwrap_or(0)
-}
-
-fn terrain_surface(world: &WorldData, coord: Coord, mountain_level: u8) -> f32 {
-    let height_level = *world
-        .tectonics
+fn terrain_surface(terrain: &StaticTerrain, coord: Coord) -> f32 {
+    let height_level = *terrain
         .height_level
         .get(coord)
         .expect("rendered coord must be in bounds");
@@ -455,27 +427,18 @@ fn terrain_surface(world: &WorldData, coord: Coord, mountain_level: u8) -> f32 {
     match height_level {
         0 => OCEAN_HEIGHT,
         1 => COAST_HEIGHT,
-        level if level >= mountain_level => MOUNTAIN_HEIGHT,
-        _ if world
-            .tectonics
-            .is_hilly
-            .get(coord)
-            .copied()
-            .unwrap_or(false) =>
-        {
-            HILL_HEIGHT
-        }
+        level if level >= terrain.mountain_level => MOUNTAIN_HEIGHT,
+        _ if terrain.is_hilly.get(coord).copied().unwrap_or(false) => HILL_HEIGHT,
         _ => LAND_HEIGHT,
     }
 }
 
-fn is_mountain(world: &WorldData, coord: Coord, mountain_level: u8) -> bool {
-    world
-        .tectonics
+fn is_mountain(terrain: &StaticTerrain, coord: Coord) -> bool {
+    terrain
         .height_level
         .get(coord)
         .copied()
-        .is_some_and(|level| level >= mountain_level)
+        .is_some_and(|level| level >= terrain.mountain_level)
 }
 
 fn edge_corners(direction: Direction) -> [usize; 2] {

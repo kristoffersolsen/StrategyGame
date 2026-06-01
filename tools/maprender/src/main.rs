@@ -13,6 +13,7 @@ use anyhow::{Context, Result};
 use bevy::{asset::AssetPlugin, log::LogPlugin, prelude::*};
 use clap::{Parser, ValueEnum};
 use game::rendering::{RenderStartupConfig, RenderingPlugin, TerrainRenderer};
+use game::sim::{SimPlugin, SimStartupConfig};
 use serde::Deserialize;
 use tracing::info;
 use worldgen::{BasicParams, MapSize, TuningParams, WorldParams};
@@ -28,17 +29,19 @@ fn main() -> Result<()> {
 
     let args = Args::parse();
     let preset = RenderPreset::load(&args.preset)?;
-    let config = preset.into_startup_config(args.seed, args.size, args.renderer);
+    let (sim_config, render_config) =
+        preset.into_startup_configs(args.seed, args.size, args.renderer);
 
     info!(
         preset = %args.preset.display(),
-        seed = config.world_params.seed,
-        renderer = ?config.terrain_renderer,
+        seed = sim_config.world_params.seed,
+        renderer = ?render_config.terrain_renderer,
         "starting map renderer performance gate"
     );
 
     App::new()
-        .insert_resource(config)
+        .insert_resource(sim_config)
+        .insert_resource(render_config)
         .add_plugins(
             DefaultPlugins
                 .set(AssetPlugin {
@@ -48,6 +51,7 @@ fn main() -> Result<()> {
                 .build()
                 .disable::<LogPlugin>(),
         )
+        .add_plugins(SimPlugin)
         .add_plugins(RenderingPlugin)
         .run();
 
@@ -95,17 +99,17 @@ impl RenderPreset {
             .with_context(|| format!("failed to parse render preset: {}", path.display()))
     }
 
-    fn into_startup_config(
+    fn into_startup_configs(
         self,
         seed_override: Option<u64>,
         size_override: Option<MapSizeArg>,
         renderer_override: Option<RendererArg>,
-    ) -> RenderStartupConfig {
+    ) -> (SimStartupConfig, RenderStartupConfig) {
         let seed = seed_override.unwrap_or(self.seed);
         let map_size = size_override.unwrap_or(self.map_size);
         let renderer = renderer_override.unwrap_or(self.renderer);
 
-        RenderStartupConfig {
+        let sim_config = SimStartupConfig {
             world_params: WorldParams {
                 seed,
                 basic: BasicParams {
@@ -115,8 +119,11 @@ impl RenderPreset {
                 tuning: self.tuning,
                 ..WorldParams::default()
             },
+        };
+        let render_config = RenderStartupConfig {
             terrain_renderer: renderer.into(),
-        }
+        };
+        (sim_config, render_config)
     }
 }
 
@@ -181,12 +188,12 @@ mod tests {
             "/presets/default.ron"
         )))
         .expect("default render preset should parse");
-        let config = preset.into_startup_config(None, None, None);
+        let (sim_config, render_config) = preset.into_startup_configs(None, None, None);
 
-        assert_eq!(config.world_params.seed, 1);
-        assert_eq!(config.terrain_renderer, TerrainRenderer::VertexColor);
+        assert_eq!(sim_config.world_params.seed, 1);
+        assert_eq!(render_config.terrain_renderer, TerrainRenderer::VertexColor);
         assert_eq!(
-            config.world_params.basic.map_size.dimensions(),
+            sim_config.world_params.basic.map_size.dimensions(),
             MapSize::Medium.dimensions()
         );
     }
@@ -198,12 +205,15 @@ mod tests {
             "/presets/p2_texture_array.ron"
         )))
         .expect("P2 texture-array render preset should parse");
-        let config = preset.into_startup_config(None, None, None);
+        let (sim_config, render_config) = preset.into_startup_configs(None, None, None);
 
-        assert_eq!(config.world_params.seed, 1);
-        assert_eq!(config.terrain_renderer, TerrainRenderer::TextureArray);
+        assert_eq!(sim_config.world_params.seed, 1);
         assert_eq!(
-            config.world_params.basic.map_size.dimensions(),
+            render_config.terrain_renderer,
+            TerrainRenderer::TextureArray
+        );
+        assert_eq!(
+            sim_config.world_params.basic.map_size.dimensions(),
             MapSize::Medium.dimensions()
         );
     }
@@ -215,12 +225,12 @@ mod tests {
             "/presets/p3_3d.ron"
         )))
         .expect("P3 3D render preset should parse");
-        let config = preset.into_startup_config(None, None, None);
+        let (sim_config, render_config) = preset.into_startup_configs(None, None, None);
 
-        assert_eq!(config.world_params.seed, 1);
-        assert_eq!(config.terrain_renderer, TerrainRenderer::Terrain3d);
+        assert_eq!(sim_config.world_params.seed, 1);
+        assert_eq!(render_config.terrain_renderer, TerrainRenderer::Terrain3d);
         assert_eq!(
-            config.world_params.basic.map_size.dimensions(),
+            sim_config.world_params.basic.map_size.dimensions(),
             MapSize::Medium.dimensions()
         );
     }
