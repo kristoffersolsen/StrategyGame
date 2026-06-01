@@ -1,5 +1,4 @@
 use clap::ValueEnum;
-use game::rendering::TerrainRenderer;
 use serde::{Deserialize, Serialize};
 use worldgen::MapSize;
 
@@ -146,9 +145,9 @@ impl std::fmt::Display for MapSizeArg {
     }
 }
 
-/// Terrain renderer selection, mirroring `game::rendering::TerrainRenderer`.
+/// Historical renderer selection kept for benchmark result metadata.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
-pub enum RendererArg {
+pub(crate) enum RendererArg {
     /// P3 renderer: Bevy 3D PBR mesh path with elevation.
     #[value(name = "terrain-3d", alias = "terrain3d")]
     Terrain3d,
@@ -156,16 +155,6 @@ pub enum RendererArg {
     VertexColor,
     /// P2 renderer: terrain identity as texture-array layer indices.
     TextureArray,
-}
-
-impl From<RendererArg> for TerrainRenderer {
-    fn from(value: RendererArg) -> Self {
-        match value {
-            RendererArg::Terrain3d => Self::Terrain3d,
-            RendererArg::VertexColor => Self::VertexColor,
-            RendererArg::TextureArray => Self::TextureArray,
-        }
-    }
 }
 
 impl std::fmt::Display for RendererArg {

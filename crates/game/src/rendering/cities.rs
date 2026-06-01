@@ -16,7 +16,7 @@ use bevy::{
 
 use super::units::UnitModel;
 use crate::{
-    rendering::{RenderStartupConfig, TerrainRenderer, hex_mesh::tile_center_position},
+    rendering::hex_mesh::tile_center_position,
     sim::{CityFounded, StaticTerrain, cities::CityNetworkId, units::UnitNetworkId},
 };
 
@@ -34,19 +34,9 @@ pub(crate) struct CityAssets {
 }
 
 /// Loads city GLB assets from disk.
-///
-/// Only runs when the Terrain3d renderer is active; other renderers do not
-/// display city models.
 // Bevy system parameters are always passed by value.
 #[allow(clippy::needless_pass_by_value)]
-pub(crate) fn load_city_assets(
-    mut commands: Commands,
-    config: Res<RenderStartupConfig>,
-    asset_server: Res<AssetServer>,
-) {
-    if config.terrain_renderer != TerrainRenderer::Terrain3d {
-        return;
-    }
+pub(crate) fn load_city_assets(mut commands: Commands, asset_server: Res<AssetServer>) {
     let city = asset_server.load(GltfAssetLabel::Scene(0).from_asset("glb-assets/city/city.glb"));
     commands.insert_resource(CityAssets { city });
 }
@@ -61,20 +51,15 @@ pub(crate) struct CityModel;
 /// Reacts to [`CityFounded`] messages: spawns a city model entity and
 /// despawns the settler model entity that was consumed during founding.
 ///
-/// Only active in Terrain3d mode; returns early for other renderers.
 // Bevy system parameters are always passed by value.
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) fn spawn_city_on_founded(
     mut commands: Commands,
     mut founded: MessageReader<CityFounded>,
-    config: Res<RenderStartupConfig>,
     terrain: Res<StaticTerrain>,
     city_assets: Option<Res<CityAssets>>,
     settler_models: Query<(Entity, &UnitNetworkId), With<UnitModel>>,
 ) {
-    if config.terrain_renderer != TerrainRenderer::Terrain3d {
-        return;
-    }
     let Some(city_assets) = city_assets else {
         return;
     };

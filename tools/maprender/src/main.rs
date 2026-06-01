@@ -12,7 +12,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use bevy::{asset::AssetPlugin, log::LogPlugin, prelude::*};
 use clap::{Parser, ValueEnum};
-use game::rendering::{RenderStartupConfig, RenderingPlugin, TerrainRenderer};
+use game::rendering::{
+    RenderStartupConfig, RenderingPlugin, terrain_surface::build_corner_prototype_suite_data,
+};
 use game::sim::{SimPlugin, SimStartupConfig};
 use serde::Deserialize;
 use tracing::info;
@@ -28,15 +30,19 @@ fn main() -> Result<()> {
         .init();
 
     let args = Args::parse();
+    if let Some(PrototypeArg::Corners) = args.prototype {
+        info!("starting R1 three-tier corner prototype harness");
+        run_corner_prototype();
+        return Ok(());
+    }
+
     let preset = RenderPreset::load(&args.preset)?;
-    let (sim_config, render_config) =
-        preset.into_startup_configs(args.seed, args.size, args.renderer);
+    let (sim_config, render_config) = preset.into_startup_configs(args.seed, args.size);
 
     info!(
         preset = %args.preset.display(),
         seed = sim_config.world_params.seed,
-        renderer = ?render_config.terrain_renderer,
-        "starting map renderer performance gate"
+        "starting map renderer"
     );
 
     App::new()
@@ -58,6 +64,48 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+fn run_corner_prototype() {
+    App::new()
+        .add_plugins(
+            DefaultPlugins
+                .set(AssetPlugin {
+                    file_path: workspace_asset_path(),
+                    ..Default::default()
+                })
+                .build()
+                .disable::<LogPlugin>(),
+        )
+        .add_systems(Startup, spawn_corner_prototype)
+        .run();
+}
+
+fn spawn_corner_prototype(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let mesh = meshes.add(build_corner_prototype_suite_data().into_mesh());
+    let material = materials.add(StandardMaterial {
+        base_color: Color::WHITE,
+        perceptual_roughness: 0.8,
+        ..Default::default()
+    });
+    commands.spawn((Mesh3d(mesh), MeshMaterial3d(material), Transform::default()));
+    commands.spawn((
+        DirectionalLight {
+            illuminance: 15_000.0,
+            shadows_enabled: false,
+            ..Default::default()
+        },
+        Transform::from_xyz(-120.0, -160.0, 220.0).looking_at(Vec3::ZERO, Vec3::Z),
+    ));
+    commands.spawn((
+        Camera3d::default(),
+        Transform::from_xyz(150.0, -300.0, 220.0)
+            .looking_at(Vec3::new(150.0, -130.0, 4.0), Vec3::Z),
+    ));
+}
+
 fn workspace_asset_path() -> String {
     format!("{}/../../assets", env!("CARGO_MANIFEST_DIR"))
 }
@@ -77,9 +125,9 @@ struct Args {
     #[arg(long)]
     size: Option<MapSizeArg>,
 
-    /// Override the preset renderer.
+    /// Launch an isolated prototype harness instead of a generated map.
     #[arg(long)]
-    renderer: Option<RendererArg>,
+    prototype: Option<PrototypeArg>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -87,7 +135,6 @@ struct Args {
 struct RenderPreset {
     seed: u64,
     map_size: MapSizeArg,
-    renderer: RendererArg,
     tuning: TuningParams,
 }
 
@@ -103,11 +150,9 @@ impl RenderPreset {
         self,
         seed_override: Option<u64>,
         size_override: Option<MapSizeArg>,
-        renderer_override: Option<RendererArg>,
     ) -> (SimStartupConfig, RenderStartupConfig) {
         let seed = seed_override.unwrap_or(self.seed);
         let map_size = size_override.unwrap_or(self.map_size);
-        let renderer = renderer_override.unwrap_or(self.renderer);
 
         let sim_config = SimStartupConfig {
             world_params: WorldParams {
@@ -120,9 +165,7 @@ impl RenderPreset {
                 ..WorldParams::default()
             },
         };
-        let render_config = RenderStartupConfig {
-            terrain_renderer: renderer.into(),
-        };
+        let render_config = RenderStartupConfig;
         (sim_config, render_config)
     }
 }
@@ -132,7 +175,6 @@ impl Default for RenderPreset {
         Self {
             seed: 1,
             map_size: MapSizeArg::Medium,
-            renderer: RendererArg::VertexColor,
             tuning: TuningParams::default(),
         }
     }
@@ -159,22 +201,9 @@ impl From<MapSizeArg> for MapSize {
     }
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, ValueEnum)]
-enum RendererArg {
-    VertexColor,
-    TextureArray,
-    #[value(name = "terrain-3d", alias = "terrain3d")]
-    Terrain3d,
-}
-
-impl From<RendererArg> for TerrainRenderer {
-    fn from(value: RendererArg) -> Self {
-        match value {
-            RendererArg::VertexColor => Self::VertexColor,
-            RendererArg::TextureArray => Self::TextureArray,
-            RendererArg::Terrain3d => Self::Terrain3d,
-        }
-    }
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum PrototypeArg {
+    Corners,
 }
 
 #[cfg(test)]
@@ -188,47 +217,9 @@ mod tests {
             "/presets/default.ron"
         )))
         .expect("default render preset should parse");
-        let (sim_config, render_config) = preset.into_startup_configs(None, None, None);
+        let (sim_config, _render_config) = preset.into_startup_configs(None, None);
 
         assert_eq!(sim_config.world_params.seed, 1);
-        assert_eq!(render_config.terrain_renderer, TerrainRenderer::VertexColor);
-        assert_eq!(
-            sim_config.world_params.basic.map_size.dimensions(),
-            MapSize::Medium.dimensions()
-        );
-    }
-
-    #[test]
-    fn p2_texture_array_preset_loads() {
-        let preset = RenderPreset::load(Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/presets/p2_texture_array.ron"
-        )))
-        .expect("P2 texture-array render preset should parse");
-        let (sim_config, render_config) = preset.into_startup_configs(None, None, None);
-
-        assert_eq!(sim_config.world_params.seed, 1);
-        assert_eq!(
-            render_config.terrain_renderer,
-            TerrainRenderer::TextureArray
-        );
-        assert_eq!(
-            sim_config.world_params.basic.map_size.dimensions(),
-            MapSize::Medium.dimensions()
-        );
-    }
-
-    #[test]
-    fn p3_3d_preset_loads() {
-        let preset = RenderPreset::load(Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/presets/p3_3d.ron"
-        )))
-        .expect("P3 3D render preset should parse");
-        let (sim_config, render_config) = preset.into_startup_configs(None, None, None);
-
-        assert_eq!(sim_config.world_params.seed, 1);
-        assert_eq!(render_config.terrain_renderer, TerrainRenderer::Terrain3d);
         assert_eq!(
             sim_config.world_params.basic.map_size.dimensions(),
             MapSize::Medium.dimensions()

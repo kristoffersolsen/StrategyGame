@@ -72,7 +72,7 @@ mod world_model;
 mod yield_table;
 
 pub(crate) use commands::{CommandQueue, GameCommand, PlayerId};
-pub(crate) use events::{CityFounded, CommandRejected, UnitMoved};
+pub(crate) use events::{CityFounded, CommandRejected, TerrainChanged, UnitMoved};
 pub(crate) use network_id::EntityLookup;
 pub(crate) use terrain::StaticTerrain;
 pub(crate) use turn_phase::{EndTurnRequested, TurnPhase, TurnState};
@@ -136,6 +136,7 @@ impl Plugin for SimPlugin {
             .add_message::<CommandRejected>()
             .add_message::<UnitMoved>()
             .add_message::<CityFounded>()
+            .add_message::<TerrainChanged>()
             // Build authoritative terrain and runtime state before
             // presentation-owned OnEnter schedules consume them.
             .add_systems(

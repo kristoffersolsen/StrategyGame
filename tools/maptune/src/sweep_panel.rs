@@ -4,7 +4,7 @@ use eframe::egui;
 
 use crate::sweep::SWEEPABLE_PARAMS;
 
-/// Live sweep configuration held in [`crate::app::AppState`].
+/// Live sweep configuration held by the tuning app state.
 #[derive(Debug, Clone)]
 pub(crate) struct SweepConfig {
     pub(crate) param: String,

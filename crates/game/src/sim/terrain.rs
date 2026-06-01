@@ -17,6 +17,18 @@ use worldgen::{BiomeHandle, BiomeRegistry, Field, ResourceHandle, ResourceRegist
 // Movement cost sentinel for impassable tiles (ocean, coast, mountain, lake).
 pub(crate) const IMPASSABLE: u8 = u8::MAX;
 
+/// Classification of the transition across a shared edge between two adjacent
+/// tiles, derived from their tier delta and passability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EdgeClass {
+    /// Same tier: flat meeting.
+    Flat,
+    /// Small passable delta: traversable ramp.
+    Slope,
+    /// Large delta or impassable: near-vertical cliff.
+    Cliff,
+}
+
 /// `game`'s owned static terrain resource.
 ///
 /// All fields are game-relevant. Generation intermediates (raw elevation,
@@ -80,6 +92,9 @@ pub(crate) struct StaticTerrain {
     ///
     /// Values in `[0.0, 1.0]`. Used by the 3D renderer to decide where to
     /// place tree models. Non-forest biomes and non-biome tiles receive `0.0`.
+    // Reserved for the future feature render layer; terrain R0 disables that
+    // layer while keeping the core terrain field.
+    #[allow(dead_code)]
     pub(crate) forest_density: Field<f32>,
 
     /// Resource placement.
@@ -191,7 +206,7 @@ fn tile_movement_cost(
     is_forest: bool,
     is_lake: bool,
 ) -> u8 {
-    if height_level == 0 || height_level == 1 || height_level >= mountain_level || is_lake {
+    if is_impassable_terrain(height_level, mountain_level, is_lake) {
         return IMPASSABLE;
     }
     let mut cost: u8 = 1;
@@ -202,6 +217,30 @@ fn tile_movement_cost(
         cost = cost.saturating_add(1);
     }
     cost
+}
+
+/// Classifies the edge between two adjacent tiles.
+///
+/// Core-owned because passability is mechanical game state: the simulation
+/// decides a transition is a cliff; presentation consumes that decision.
+pub(crate) fn edge_class(a: Coord, b: Coord, terrain: &StaticTerrain) -> EdgeClass {
+    let a_cost = terrain.movement_cost.get(a).copied().unwrap_or(IMPASSABLE);
+    let b_cost = terrain.movement_cost.get(b).copied().unwrap_or(IMPASSABLE);
+    if a_cost == IMPASSABLE || b_cost == IMPASSABLE {
+        return EdgeClass::Cliff;
+    }
+
+    let a_level = terrain.height_level.get(a).copied().unwrap_or(0);
+    let b_level = terrain.height_level.get(b).copied().unwrap_or(0);
+    match a_level.abs_diff(b_level) {
+        0 => EdgeClass::Flat,
+        1 => EdgeClass::Slope,
+        _ => EdgeClass::Cliff,
+    }
+}
+
+fn is_impassable_terrain(height_level: u8, mountain_level: u8, is_lake: bool) -> bool {
+    height_level == 0 || height_level == 1 || height_level >= mountain_level || is_lake
 }
 
 #[cfg(test)]
@@ -222,5 +261,71 @@ mod tests {
         assert_eq!(tile_movement_cost(2, 5, true, false, false), 2); // hills
         assert_eq!(tile_movement_cost(2, 5, false, true, false), 2); // forest
         assert_eq!(tile_movement_cost(2, 5, true, true, false), 3); // hilly forest
+    }
+
+    fn edge_test_terrain(a_level: u8, b_level: u8, b_cost: u8) -> StaticTerrain {
+        let bounds = MapBounds::new(4, 4);
+        let mut height_level = Field::filled(bounds, a_level);
+        height_level.set(Coord::new(1, 0), b_level);
+        let mut movement_cost = Field::filled(bounds, 1);
+        movement_cost.set(Coord::new(1, 0), b_cost);
+        StaticTerrain {
+            bounds,
+            mountain_level: 5,
+            height_level,
+            is_hilly: Field::filled(bounds, false),
+            has_river: Field::filled(bounds, false),
+            is_floodplain: Field::filled(bounds, false),
+            is_lake: Field::filled(bounds, false),
+            biome: Field::filled(bounds, None),
+            forest_density: Field::filled(bounds, 0.0),
+            resource: Field::filled(bounds, None),
+            movement_cost,
+            start_positions: vec![],
+            biome_registry: BiomeRegistry {
+                inner: content::Registry::build([] as [&str; 0]),
+                is_forest: vec![],
+            },
+            resource_registry: ResourceRegistry {
+                inner: content::Registry::build([] as [&str; 0]),
+                category: vec![],
+            },
+        }
+    }
+
+    #[test]
+    fn edge_class_flat_for_same_passable_tier() {
+        let terrain = edge_test_terrain(2, 2, 1);
+        assert_eq!(
+            edge_class(Coord::new(0, 0), Coord::new(1, 0), &terrain),
+            EdgeClass::Flat
+        );
+    }
+
+    #[test]
+    fn edge_class_slope_for_one_step_passable_delta() {
+        let terrain = edge_test_terrain(2, 3, 1);
+        assert_eq!(
+            edge_class(Coord::new(0, 0), Coord::new(1, 0), &terrain),
+            EdgeClass::Slope
+        );
+    }
+
+    #[test]
+    fn edge_class_cliff_for_large_delta() {
+        let terrain = edge_test_terrain(2, 4, 1);
+        assert_eq!(
+            edge_class(Coord::new(0, 0), Coord::new(1, 0), &terrain),
+            EdgeClass::Cliff
+        );
+    }
+
+    #[test]
+    fn edge_class_cliff_for_impassable_tile() {
+        let terrain = edge_test_terrain(2, 3, IMPASSABLE);
+        assert_eq!(
+            edge_class(Coord::new(0, 0), Coord::new(1, 0), &terrain),
+            EdgeClass::Cliff
+        );
     }
 }

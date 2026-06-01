@@ -2,13 +2,9 @@
 //
 // Run with:
 //   cargo run --release -p maprender -- --preset tools/maprender/presets/default.ron
-//
-// `renderer` is intentionally explicit. P1 uses VertexColor; P2 uses
-// TextureArray.
 (
     seed: 1,
     map_size: Medium,
-    renderer: VertexColor,
 
     // Same shape as worldgen::TuningParams. Omit sections to use defaults.
     tuning: (
