@@ -734,6 +734,6 @@ noted in the yield-system ADR.
 
 ## Status
 
-**Current stage:** Stage 6 complete; Stages 5, 4.5, 4, 3.6, and rendering plan P1–P3 also complete.
+**Current stage:** Stage 7 complete; Stages 6, 5, 4.5, 4, 3.6, and rendering plan P1–P3 also complete.
 
-**Next action:** Begin Stage 7 — Found a city.
+**Next action:** Begin Stage 8 — Improvements and development (pending design decisions on yield transform shape and resource-yield rules).

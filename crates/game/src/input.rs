@@ -27,7 +27,7 @@ use crate::{
     sim::{
         CommandQueue, EndTurnRequested, EntityLookup, GameCommand, PlayerId, StaticTerrain,
         TileState, TurnPhase, UnitCoord, UnitNetworkId,
-        units::{MovementPoints, reachable_tiles},
+        units::{MovementPoints, UnitKind, reachable_tiles},
     },
 };
 
@@ -43,7 +43,12 @@ impl Plugin for InputPlugin {
             .init_resource::<MovementOverlay>()
             .add_systems(
                 Update,
-                (handle_selection, handle_movement_input, handle_end_turn_key)
+                (
+                    handle_selection,
+                    handle_movement_input,
+                    handle_found_city,
+                    handle_end_turn_key,
+                )
                     .run_if(in_state(TurnPhase::PlayerInput)),
             );
     }
@@ -226,6 +231,38 @@ fn handle_movement_input(
         overlay.reachable.clear();
         overlay.spawned = false;
     }
+}
+
+/// Issues a [`GameCommand::FoundCity`] when the player presses `F` with a
+/// settler selected.
+///
+/// The processor validates the command and rejects it with a
+/// [`CommandRejected`] message if the tile is not foundable or is too
+/// close to an existing city.
+// Bevy system parameters are always passed by value.
+#[allow(clippy::needless_pass_by_value)]
+fn handle_found_city(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    selection: Res<SelectionState>,
+    units: Query<(&UnitNetworkId, &UnitKind)>,
+    mut queue: ResMut<CommandQueue>,
+) {
+    if !keyboard.just_pressed(KeyCode::KeyF) {
+        return;
+    }
+    let Some(selected_entity) = selection.selected_unit else {
+        return;
+    };
+    let Ok((net_id, kind)) = units.get(selected_entity) else {
+        return;
+    };
+    if *kind != UnitKind::Settler {
+        return;
+    }
+    queue.push(GameCommand::FoundCity {
+        player_id: PlayerId(0),
+        settler_id: net_id.0,
+    });
 }
 
 /// Writes [`EndTurnRequested`] when the player presses Enter or Space.

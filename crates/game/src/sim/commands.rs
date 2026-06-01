@@ -32,8 +32,6 @@ pub(crate) enum GameCommand {
     /// Validated by the processor:
     /// - Source tile must have an occupant matching `unit_id`.
     /// - Destination must be passable and unoccupied (1UPT).
-    // Stage 6+: constructed by the input system when the player clicks a destination.
-    #[allow(dead_code)]
     MoveUnit {
         /// Player issuing the command; must own the unit.
         player_id: PlayerId,
@@ -41,6 +39,23 @@ pub(crate) enum GameCommand {
         unit_id: NetworkId,
         /// Target tile. Must be passable; 1UPT is enforced.
         destination: Coord,
+    },
+
+    /// Found a city at the settler's current position.
+    ///
+    /// Validated by the processor:
+    /// - `settler_id` must identify a settler owned by `player_id`.
+    /// - The settler's tile must be passable (not ocean/coast/mountain/lake).
+    /// - No existing city may be within [`super::cities::MIN_CITY_SPACING`]
+    ///   tiles.
+    ///
+    /// On success: the settler is consumed, a `City` entity is spawned, and
+    /// the tile's `tile_owner` is set to the new city's [`NetworkId`].
+    FoundCity {
+        /// Player issuing the command; must own the settler.
+        player_id: PlayerId,
+        /// The settler unit to consume.
+        settler_id: NetworkId,
     },
 }
 
@@ -56,8 +71,6 @@ pub(crate) struct CommandQueue {
 
 impl CommandQueue {
     /// Enqueues `command` at the back of the queue.
-    // Stage 6+: called by the input system.
-    #[allow(dead_code)]
     pub(crate) fn push(&mut self, command: GameCommand) {
         self.pending.push_back(command);
     }
@@ -110,11 +123,15 @@ mod tests {
         assert_eq!(queue.len(), 2);
 
         let first = queue.pop().unwrap();
-        let GameCommand::MoveUnit { unit_id, .. } = first;
+        let GameCommand::MoveUnit { unit_id, .. } = first else {
+            panic!("expected MoveUnit");
+        };
         assert_eq!(unit_id, unit_a, "first out must be first in");
 
         let second = queue.pop().unwrap();
-        let GameCommand::MoveUnit { unit_id, .. } = second;
+        let GameCommand::MoveUnit { unit_id, .. } = second else {
+            panic!("expected MoveUnit");
+        };
         assert_eq!(unit_id, unit_b, "second out must be second in");
 
         assert!(queue.is_empty());

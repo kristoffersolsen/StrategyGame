@@ -48,7 +48,19 @@
 //! - [`units::reset_movement_points`] — resets movement budget at turn start.
 //! - Startup scheduling initialises static terrain, runtime tile state, and
 //!   initial units before presentation-owned state transitions run.
+//!
+//! # Stage 7 contents
+//!
+//! - [`cities::City`] — marker component for city entities.
+//! - [`cities::CityNetworkId`] — wraps the authoritative network id.
+//! - [`cities::CityPlayerId`] — ownership component.
+//! - [`cities::CityCoord`] — hex-grid centre-tile coordinate.
+//! - [`cities::OwnedTiles`] — city-side view of the owned-tile set.
+//! - [`cities::MIN_CITY_SPACING`] — minimum distance between city centres.
+//! - [`events::CityFounded`] — emitted after a successful `FoundCity`.
+//! - [`commands::GameCommand::FoundCity`] — found-city command variant.
 
+pub(crate) mod cities;
 mod commands;
 mod events;
 mod network_id;
@@ -60,7 +72,7 @@ mod world_model;
 mod yield_table;
 
 pub(crate) use commands::{CommandQueue, GameCommand, PlayerId};
-pub(crate) use events::{CommandRejected, UnitMoved};
+pub(crate) use events::{CityFounded, CommandRejected, UnitMoved};
 pub(crate) use network_id::EntityLookup;
 pub(crate) use terrain::StaticTerrain;
 pub(crate) use turn_phase::{EndTurnRequested, TurnPhase, TurnState};
@@ -74,14 +86,20 @@ use bevy::prelude::{
     Update, in_state,
 };
 use tracing::info;
-use worldgen::{WorldParams, generate_world};
+use worldgen::{TuningParams, WorldParams, generate_world};
 
-use events::CityFounded;
 use network_id::NetworkIdAllocator;
 use yield_table::tile_yield;
 
 /// Default world-generation parameter asset, relative to the workspace root.
 const DEFAULT_WORLD_PARAMS_PATH: &str = "assets/worldgen/default_params.ron";
+
+/// Tuning preset applied on top of `default_params.ron` at startup.
+///
+/// Provides seed, `BasicParams`, and `AdvancedParams`; tuning is
+/// overridden with values from this preset so the in-game world matches
+/// the reference preset used during world-generation tuning.
+const GAME_TUNING_PRESET_PATH: &str = "tools/maptest/presets/default.ron";
 
 /// Startup inputs for the authoritative simulation core.
 #[derive(Resource, Debug, Clone)]
@@ -197,12 +215,27 @@ fn sim_init(mut commands: Commands, terrain: Res<StaticTerrain>) {
 
 fn load_default_world_params() -> WorldParams {
     let text = read_workspace_file(DEFAULT_WORLD_PARAMS_PATH);
-    let params: WorldParams = ron::from_str(&text).unwrap_or_else(|error| {
+    let mut params: WorldParams = ron::from_str(&text).unwrap_or_else(|error| {
         panic!("failed to parse default world params '{DEFAULT_WORLD_PARAMS_PATH}': {error}");
     });
     params.validate().unwrap_or_else(|error| {
         panic!("default world params '{DEFAULT_WORLD_PARAMS_PATH}' failed validation: {error}");
     });
+
+    // Apply the game tuning preset. `default_params.ron` supplies the seed,
+    // BasicParams, and AdvancedParams; this preset overrides all TuningParams
+    // so the rendered map matches the reference used during tuning.
+    let preset_text = read_workspace_file(GAME_TUNING_PRESET_PATH);
+    let tuning: TuningParams = ron::from_str(&preset_text).unwrap_or_else(|error| {
+        panic!("failed to parse tuning preset '{GAME_TUNING_PRESET_PATH}': {error}");
+    });
+    params.tuning = tuning;
+    params.validate().unwrap_or_else(|error| {
+        panic!(
+            "world params after applying '{GAME_TUNING_PRESET_PATH}' failed validation: {error}"
+        );
+    });
+
     params
 }
 
@@ -226,12 +259,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sim_startup_config_loads_default_params_asset() {
+    fn sim_startup_config_seed_and_basic_come_from_default_params_asset() {
         let config = SimStartupConfig::default();
         let asset_text = read_workspace_file(DEFAULT_WORLD_PARAMS_PATH);
         let asset_params: WorldParams =
             ron::from_str(&asset_text).expect("default world params asset must parse");
 
-        assert_eq!(config.world_params, asset_params);
+        // Seed, BasicParams, and AdvancedParams come from default_params.ron.
+        // TuningParams is overridden by GAME_TUNING_PRESET_PATH.
+        assert_eq!(config.world_params.seed, asset_params.seed);
+        assert_eq!(config.world_params.basic, asset_params.basic);
+        assert_eq!(config.world_params.advanced, asset_params.advanced);
+    }
+
+    #[test]
+    fn sim_startup_config_tuning_comes_from_game_preset() {
+        let config = SimStartupConfig::default();
+        let preset_text = read_workspace_file(GAME_TUNING_PRESET_PATH);
+        let preset_tuning: TuningParams =
+            ron::from_str(&preset_text).expect("game tuning preset must parse");
+
+        assert_eq!(config.world_params.tuning, preset_tuning);
     }
 }

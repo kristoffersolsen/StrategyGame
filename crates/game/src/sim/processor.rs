@@ -15,15 +15,16 @@
 //! See design rule §13.5: systems outside the processor never mutate game
 //! state directly.
 
-use bevy::prelude::{MessageWriter, Query, Res, ResMut};
+use bevy::prelude::{Commands, MessageWriter, Query, Res, ResMut};
 use coords::Coord;
 
 use crate::sim::{
+    cities::{City, CityCoord, CityNetworkId, CityPlayerId, MIN_CITY_SPACING, OwnedTiles},
     commands::{CommandQueue, GameCommand, PlayerId},
-    events::{CommandRejected, RejectionReason, UnitMoved},
-    network_id::{EntityLookup, NetworkId},
-    terrain::StaticTerrain,
-    units::{MovementPoints, UnitCoord, UnitPlayerId, path_cost},
+    events::{CityFounded, CommandRejected, RejectionReason, UnitMoved},
+    network_id::{EntityLookup, NetworkId, NetworkIdAllocator},
+    terrain::{IMPASSABLE, StaticTerrain},
+    units::{MovementPoints, UnitCoord, UnitKind, UnitPlayerId, path_cost},
     world_model::TileState,
 };
 
@@ -31,18 +32,27 @@ use crate::sim::{
 ///
 /// Runs every frame in [`TurnPhase::PlayerInput`] so that commands issued by
 /// the input tier take effect without delay. For each command:
-/// - if valid: mutates tile state and unit components, emits a result message
+/// - if valid: mutates tile state and unit/city components, emits a result message
 /// - if invalid: emits [`CommandRejected`] without changing state
 // Bevy system parameters are always passed by value.
 #[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
 pub(crate) fn process_commands(
+    mut commands: Commands,
     mut queue: ResMut<CommandQueue>,
     terrain: Res<StaticTerrain>,
     mut tile_state: ResMut<TileState>,
-    entity_lookup: Res<EntityLookup>,
+    mut entity_lookup: ResMut<EntityLookup>,
+    mut alloc: ResMut<NetworkIdAllocator>,
     mut rejected: MessageWriter<CommandRejected>,
     mut unit_moved: MessageWriter<UnitMoved>,
-    mut units: Query<(&UnitPlayerId, &mut UnitCoord, &mut MovementPoints)>,
+    mut city_founded: MessageWriter<CityFounded>,
+    mut units: Query<(
+        &UnitPlayerId,
+        &mut UnitCoord,
+        &mut MovementPoints,
+        &UnitKind,
+    )>,
+    city_coords: Query<&CityCoord>,
 ) {
     while let Some(cmd) = queue.pop() {
         match cmd {
@@ -68,6 +78,29 @@ pub(crate) fn process_commands(
                     }
                 }
             }
+            GameCommand::FoundCity {
+                player_id,
+                settler_id,
+            } => {
+                match apply_found_city(
+                    &mut commands,
+                    player_id,
+                    settler_id,
+                    &terrain,
+                    &mut tile_state,
+                    &mut entity_lookup,
+                    &mut alloc,
+                    &units,
+                    &city_coords,
+                ) {
+                    Ok(event) => {
+                        city_founded.write(event);
+                    }
+                    Err(reason) => {
+                        rejected.write(CommandRejected { reason });
+                    }
+                }
+            }
         }
     }
 }
@@ -85,15 +118,21 @@ fn apply_move_unit(
     terrain: &StaticTerrain,
     tile_state: &mut TileState,
     entity_lookup: &EntityLookup,
-    units: &mut Query<(&UnitPlayerId, &mut UnitCoord, &mut MovementPoints)>,
+    units: &mut Query<(
+        &UnitPlayerId,
+        &mut UnitCoord,
+        &mut MovementPoints,
+        &UnitKind,
+    )>,
 ) -> Result<UnitMoved, RejectionReason> {
     let entity = entity_lookup
         .get(unit_id)
         .ok_or(RejectionReason::UnitNotFound)?;
 
-    let (unit_player_id, mut unit_coord, mut movement_points) = units
-        .get_mut(entity)
-        .map_err(|_| RejectionReason::UnitNotFound)?;
+    let (unit_player_id, mut unit_coord, mut movement_points, _unit_kind) =
+        units
+            .get_mut(entity)
+            .map_err(|_| RejectionReason::UnitNotFound)?;
 
     if unit_player_id.0 != player_id {
         return Err(RejectionReason::NotYourUnit);
@@ -131,6 +170,123 @@ fn apply_move_unit(
     })
 }
 
+/// Validates and applies a [`GameCommand::FoundCity`] command.
+///
+/// On success: spawns a `City` entity, updates tile ownership, despawns the
+/// settler entity, and returns a [`CityFounded`] event for the view tier.
+///
+/// # Errors
+///
+/// Returns a [`RejectionReason`] describing the validation failure. No state
+/// is mutated when an error is returned.
+#[allow(clippy::too_many_arguments)]
+fn apply_found_city(
+    commands: &mut Commands,
+    player_id: PlayerId,
+    settler_id: NetworkId,
+    terrain: &StaticTerrain,
+    tile_state: &mut TileState,
+    entity_lookup: &mut EntityLookup,
+    alloc: &mut NetworkIdAllocator,
+    units: &Query<(
+        &UnitPlayerId,
+        &mut UnitCoord,
+        &mut MovementPoints,
+        &UnitKind,
+    )>,
+    city_coords: &Query<&CityCoord>,
+) -> Result<CityFounded, RejectionReason> {
+    let settler_entity = entity_lookup
+        .get(settler_id)
+        .ok_or(RejectionReason::UnitNotFound)?;
+
+    let (unit_player_id, unit_coord, _mp, unit_kind) = units
+        .get(settler_entity)
+        .map_err(|_| RejectionReason::UnitNotFound)?;
+
+    if unit_player_id.0 != player_id {
+        return Err(RejectionReason::NotYourUnit);
+    }
+
+    if *unit_kind != UnitKind::Settler {
+        return Err(RejectionReason::NotASettler);
+    }
+
+    let coord = unit_coord.0;
+
+    let move_cost = terrain
+        .movement_cost
+        .get(coord)
+        .copied()
+        .unwrap_or(IMPASSABLE);
+    if move_cost == IMPASSABLE {
+        return Err(RejectionReason::TileNotFoundable);
+    }
+
+    for existing in city_coords.iter() {
+        if terrain.bounds.distance(coord, existing.0) <= MIN_CITY_SPACING {
+            return Err(RejectionReason::TooCloseToExistingCity);
+        }
+    }
+
+    // All checks passed — apply the founding.
+    let city_id = alloc.next();
+
+    let city_entity = commands
+        .spawn((
+            City,
+            CityNetworkId(city_id),
+            CityPlayerId(player_id),
+            CityCoord(coord),
+            OwnedTiles(vec![coord]),
+        ))
+        .id();
+
+    entity_lookup.insert(city_id, city_entity);
+    entity_lookup.remove(settler_id);
+    commands.entity(settler_entity).despawn();
+
+    tile_state.tile_occupant.set(coord, None);
+    tile_state.tile_owner.set(coord, Some(city_id));
+
+    tracing::info!(
+        coord = ?coord,
+        city_id = ?city_id,
+        "city founded"
+    );
+
+    Ok(CityFounded {
+        city_id,
+        player_id,
+        coord,
+        consumed_settler_id: settler_id,
+    })
+}
+
+/// Returns `true` if a tile at `coord` is passable land (foundable).
+///
+/// Pure helper for unit tests — only compiled in test configuration.
+#[cfg(test)]
+fn is_foundable_tile(coord: Coord, terrain: &StaticTerrain) -> bool {
+    terrain
+        .movement_cost
+        .get(coord)
+        .copied()
+        .unwrap_or(IMPASSABLE)
+        != IMPASSABLE
+}
+
+/// Returns `true` if `coord` is too close to any city in `existing`.
+///
+/// "Too close" means distance ≤ [`MIN_CITY_SPACING`]. Pure helper for
+/// unit tests — only compiled in test configuration.
+#[cfg(test)]
+fn is_too_close_to_city(coord: Coord, terrain: &StaticTerrain, existing: &[Coord]) -> bool {
+    existing
+        .iter()
+        .any(|&c| terrain.bounds.distance(coord, c) <= MIN_CITY_SPACING)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -139,6 +295,7 @@ mod tests {
     use worldgen::{BiomeRegistry, Field, ResourceRegistry};
 
     use crate::sim::{
+        network_id::NetworkIdAllocator,
         terrain::StaticTerrain,
         units::{path_cost, reachable_tiles},
         world_model::TileState,
@@ -237,6 +394,61 @@ mod tests {
         assert_eq!(
             keys_a, keys_b,
             "identical inputs must produce identical reachable sets"
+        );
+    }
+
+    // --- Stage 7: found-city validation helpers ---
+
+    #[test]
+    fn passable_tile_is_foundable() {
+        let bounds = MapBounds::new(8, 8);
+        let terrain = passable_terrain(bounds);
+        assert!(is_foundable_tile(Coord::new(3, 3), &terrain));
+    }
+
+    #[test]
+    fn impassable_tile_is_not_foundable() {
+        let bounds = MapBounds::new(8, 8);
+        let mut terrain = passable_terrain(bounds);
+        let blocked = Coord::new(4, 4);
+        terrain.movement_cost.set(blocked, IMPASSABLE);
+        assert!(!is_foundable_tile(blocked, &terrain));
+    }
+
+    #[test]
+    fn too_close_returns_true_within_spacing() {
+        let bounds = MapBounds::new(20, 20);
+        let terrain = passable_terrain(bounds);
+        let new_city = Coord::new(10, 10);
+        let existing = Coord::new(12, 10); // distance 2 — within spacing
+        assert!(is_too_close_to_city(new_city, &terrain, &[existing]));
+    }
+
+    #[test]
+    fn too_close_returns_false_outside_spacing() {
+        let bounds = MapBounds::new(20, 20);
+        let terrain = passable_terrain(bounds);
+        let new_city = Coord::new(10, 10);
+        let existing = Coord::new(14, 10); // distance 4 — outside spacing
+        assert!(!is_too_close_to_city(new_city, &terrain, &[existing]));
+    }
+
+    #[test]
+    fn found_city_networkid_allocation_is_deterministic() {
+        // Two independent allocators in identical starting states must
+        // produce identical city NetworkIds after the same settler+city sequence.
+        let mut alloc_a = NetworkIdAllocator::default();
+        let mut alloc_b = NetworkIdAllocator::default();
+
+        let settler_a = alloc_a.next();
+        let settler_b = alloc_b.next();
+        assert_eq!(settler_a, settler_b, "settler ids must match");
+
+        let city_a = alloc_a.next();
+        let city_b = alloc_b.next();
+        assert_eq!(
+            city_a, city_b,
+            "city ids must match across identical sequences"
         );
     }
 }

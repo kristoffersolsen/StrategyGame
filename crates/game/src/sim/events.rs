@@ -36,6 +36,12 @@ pub(crate) enum RejectionReason {
     NotYourUnit,
     /// The unit does not have enough movement points remaining this turn.
     InsufficientMovementPoints,
+    /// The unit is not a settler and cannot found a city.
+    NotASettler,
+    /// The tile cannot be settled (ocean, coast, mountain, or lake).
+    TileNotFoundable,
+    /// Another city is within the minimum spacing radius.
+    TooCloseToExistingCity,
 }
 
 /// Emitted when a unit moves successfully.
@@ -58,16 +64,20 @@ pub(crate) struct UnitMoved {
 
 /// Emitted when a city is founded successfully.
 ///
-/// Defined here as the reaction contract (Stage 5).
-/// Consumed by city rendering (Stage 7+).
-// Stage 7+: emitted and consumed by the FoundCity command path.
-#[allow(dead_code)]
+/// Consumed by city rendering (Stage 7+) to spawn the city model and
+/// despawn the settler model that was consumed.
 #[derive(bevy::prelude::Message, Debug, Clone)]
 pub(crate) struct CityFounded {
     /// The newly created city.
     pub(crate) city_id: NetworkId,
     /// The player that founded the city.
+    // Stage 8+: read by ownership-display and multiplayer sync systems.
+    #[allow(dead_code)]
     pub(crate) player_id: PlayerId,
     /// The tile where the city was founded.
     pub(crate) coord: Coord,
+    /// The settler unit that was consumed to found this city.
+    ///
+    /// Used by the rendering tier to despawn the settler model entity.
+    pub(crate) consumed_settler_id: NetworkId,
 }

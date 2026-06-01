@@ -2,6 +2,7 @@
 
 mod camera;
 mod chunk_spawner;
+pub(crate) mod cities;
 mod feature_models;
 pub(crate) mod hex_mesh;
 mod lighting;
@@ -98,6 +99,8 @@ impl Plugin for RenderingPlugin {
                 OnEnter(RenderAppState::Running),
                 (units::load_unit_assets, units::spawn_unit_models).chain(),
             )
+            // City asset handles loaded once on entering Running.
+            .add_systems(OnEnter(RenderAppState::Running), cities::load_city_assets)
             // Selection highlight entity spawned once on entering Running.
             .add_systems(
                 OnEnter(RenderAppState::Running),
@@ -127,6 +130,7 @@ impl Plugin for RenderingPlugin {
                     selection::update_selection_highlight,
                     selection::update_reachable_overlay,
                     units::sync_unit_positions,
+                    cities::spawn_city_on_founded,
                 )
                     .run_if(in_state(RenderAppState::Running)),
             );
