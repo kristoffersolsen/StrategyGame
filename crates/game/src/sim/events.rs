@@ -69,15 +69,32 @@ pub(crate) struct UnitMoved {
 #[derive(bevy::prelude::Message, Debug, Clone)]
 pub(crate) struct CityFounded {
     /// The newly created city.
+    // Reserved for the future city render layer.
+    #[allow(dead_code)]
     pub(crate) city_id: NetworkId,
     /// The player that founded the city.
     // Stage 8+: read by ownership-display and multiplayer sync systems.
     #[allow(dead_code)]
     pub(crate) player_id: PlayerId,
     /// The tile where the city was founded.
+    // Reserved for the future city render layer.
+    #[allow(dead_code)]
     pub(crate) coord: Coord,
     /// The settler unit that was consumed to found this city.
     ///
     /// Used by the rendering tier to despawn the settler model entity.
+    // Reserved for the future unit render layer.
+    #[allow(dead_code)]
     pub(crate) consumed_settler_id: NetworkId,
+}
+
+/// Reserved terrain mutation notification for future localized terrain re-bakes.
+///
+/// No command emits this yet. When terrain-changing gameplay arrives, the
+/// command processor will write this message and terrain rendering will rebuild
+/// affected chunks.
+#[derive(bevy::prelude::Message, Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TerrainChanged {
+    /// Coordinates whose terrain state changed.
+    pub(crate) coords: Vec<Coord>,
 }

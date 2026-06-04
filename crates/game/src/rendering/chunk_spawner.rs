@@ -1,36 +1,25 @@
-//! Startup system that generates the world and spawns terrain chunks.
+//! Terrain-layer startup scaffolding.
 #![allow(clippy::needless_pass_by_value)]
 
 use bevy::{
-    asset::RenderAssetUsages,
-    ecs::system::SystemParam,
-    image::Image,
+    asset::{AssetServer, RenderAssetUsages},
+    image::{Image, ImageSampler},
     prelude::{
-        AlphaMode, AssetServer, Assets, Color, ColorMaterial, Commands, Component, Handle, Mesh,
-        Mesh2d, Mesh3d, MeshMaterial2d, MeshMaterial3d, NextState, Res, ResMut, Resource,
-        StandardMaterial, Transform, info,
+        Assets, Commands, Component, Handle, Mesh, Mesh3d, MeshMaterial3d, NextState, Res, ResMut,
+        Resource, Transform, info,
     },
-    render::render_resource::{Extent3d, TextureDimension, TextureFormat},
+    render::render_resource::{
+        Extent3d, TextureDimension, TextureViewDescriptor, TextureViewDimension,
+    },
 };
 use coords::{Coord, MapBounds};
 
 use crate::{
     app_state::RenderAppState,
     rendering::{
-        RenderStartupConfig, TerrainRenderer,
-        feature_models::{FeatureModelAssets, spawn_feature_models},
-        hex_mesh::{
-            CHUNK_SIZE, build_terrain_3d_chunk_mesh, build_texture_chunk_mesh,
-            build_vertex_color_chunk_mesh, build_water_plane_mesh, map_world_size,
-        },
-        terrain_lookup::{
-            P3_TEXTURE_LAYER_COUNT, P3_TEXTURE_SIZE, TEXTURE_LAYER_COUNT, TEXTURE_SIZE,
-            p3_texture_array_data, placeholder_texture_array_data,
-        },
-        terrain_material::{
-            TerrainTextureArray3dMaterial, TerrainTextureArrayMaterial,
-            configure_placeholder_texture,
-        },
+        hex_mesh::map_world_size,
+        terrain_material::{TerrainMaterial, TerrainMaterialParams},
+        terrain_surface::{CHUNK_SIZE, TerrainMeshParams, build_terrain_chunk_mesh},
     },
     sim::StaticTerrain,
 };
@@ -42,194 +31,181 @@ pub(crate) struct MapRenderBounds {
     pub(crate) height: f32,
 }
 
+/// Texture handles reserved for the replacement terrain material.
+#[derive(Resource)]
+pub(crate) struct TerrainTextureAssets {
+    layers: Vec<Handle<Image>>,
+    array_texture: Option<Handle<Image>>,
+}
+
 /// Marker for static terrain chunk entities.
 #[derive(Component)]
 struct TerrainChunk;
 
-#[derive(Resource)]
-pub(crate) struct TerrainTextureArray {
-    handle: Handle<Image>,
-}
+impl TerrainTextureAssets {
+    fn load(asset_server: &AssetServer) -> Self {
+        const LAYERS: [&str; 9] = [
+            "worldgen/textures/ocean.png",
+            "worldgen/textures/coast.png",
+            "worldgen/textures/tropical.png",
+            "worldgen/textures/temperate.png",
+            "worldgen/textures/boreal.png",
+            "worldgen/textures/grassland.png",
+            "worldgen/textures/desert.png",
+            "worldgen/textures/tundra.png",
+            "worldgen/textures/mountain.png",
+        ];
 
-#[derive(Resource)]
-pub(crate) struct TerrainTextureArray3d {
-    handle: Handle<Image>,
-}
-
-#[derive(SystemParam)]
-pub(crate) struct TerrainMaterialAssets<'w> {
-    color: ResMut<'w, Assets<ColorMaterial>>,
-    standard: ResMut<'w, Assets<StandardMaterial>>,
-    texture_array: ResMut<'w, Assets<TerrainTextureArrayMaterial>>,
-    texture_array_3d: ResMut<'w, Assets<TerrainTextureArray3dMaterial>>,
-}
-
-#[derive(SystemParam)]
-pub(crate) struct PreparedRenderAssets<'w> {
-    texture_array: Option<Res<'w, TerrainTextureArray>>,
-    texture_array_3d: Option<Res<'w, TerrainTextureArray3d>>,
-    feature_models: Option<Res<'w, FeatureModelAssets>>,
-}
-
-pub(crate) fn prepare_render_assets(
-    mut commands: Commands,
-    config: Res<RenderStartupConfig>,
-    asset_server: Res<AssetServer>,
-    mut images: ResMut<Assets<Image>>,
-    mut next_state: ResMut<NextState<RenderAppState>>,
-) {
-    if config.terrain_renderer == TerrainRenderer::TextureArray {
-        let mut texture = Image::new(
-            Extent3d {
-                width: TEXTURE_SIZE,
-                height: TEXTURE_SIZE,
-                depth_or_array_layers: TEXTURE_LAYER_COUNT,
-            },
-            TextureDimension::D2,
-            placeholder_texture_array_data(),
-            TextureFormat::Rgba8UnormSrgb,
-            RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
-        );
-        configure_placeholder_texture(&mut texture);
-        commands.insert_resource(TerrainTextureArray {
-            handle: images.add(texture),
-        });
+        Self {
+            layers: LAYERS
+                .into_iter()
+                .map(|path| asset_server.load(path))
+                .collect(),
+            array_texture: None,
+        }
     }
-    if config.terrain_renderer == TerrainRenderer::Terrain3d {
-        commands.insert_resource(FeatureModelAssets::load(&asset_server));
-        commands.insert_resource(TerrainTextureArray3d {
-            handle: images.add(Image::new(
-                Extent3d {
-                    width: P3_TEXTURE_SIZE,
-                    height: P3_TEXTURE_SIZE,
-                    depth_or_array_layers: P3_TEXTURE_LAYER_COUNT,
-                },
-                TextureDimension::D2,
-                p3_texture_array_data(),
-                TextureFormat::Rgba8UnormSrgb,
-                RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
-            )),
-        });
-    } else {
-        next_state.set(RenderAppState::SpawningChunks);
+
+    fn all_loaded(&self, asset_server: &AssetServer) -> bool {
+        let mut loaded = true;
+        for handle in &self.layers {
+            let Some(state) = asset_server.get_recursive_dependency_load_state(handle) else {
+                loaded = false;
+                continue;
+            };
+            assert!(
+                !state.is_failed(),
+                "terrain texture asset failed to load; see Bevy asset errors above"
+            );
+            loaded &= state.is_loaded();
+        }
+        loaded
     }
+
+    fn array_texture(&self) -> Handle<Image> {
+        self.array_texture
+            .as_ref()
+            .expect("terrain array texture is prepared before chunk spawning")
+            .clone()
+    }
+}
+
+pub(crate) fn prepare_render_assets(mut commands: Commands, asset_server: Res<AssetServer>) {
+    commands.insert_resource(TerrainTextureAssets::load(&asset_server));
 }
 
 pub(crate) fn finish_render_asset_loading(
-    config: Res<RenderStartupConfig>,
     asset_server: Res<AssetServer>,
-    feature_models: Option<Res<FeatureModelAssets>>,
+    mut textures: ResMut<TerrainTextureAssets>,
+    mut images: ResMut<Assets<Image>>,
     mut next_state: ResMut<NextState<RenderAppState>>,
 ) {
-    if config.terrain_renderer != TerrainRenderer::Terrain3d {
-        return;
-    }
-    let Some(feature_models) = feature_models else {
-        return;
-    };
-    if feature_models.all_loaded(&asset_server) {
+    if textures.all_loaded(&asset_server) {
+        if textures.array_texture.is_none() {
+            let array_texture = build_texture_array(&textures.layers, &images);
+            textures.array_texture = Some(images.add(array_texture));
+        }
         next_state.set(RenderAppState::SpawningChunks);
     }
 }
 
 pub(crate) fn spawn_chunks(
     mut commands: Commands,
-    config: Res<RenderStartupConfig>,
     terrain: Res<StaticTerrain>,
-    prepared_assets: PreparedRenderAssets,
+    textures: Res<TerrainTextureAssets>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut material_assets: TerrainMaterialAssets,
+    mut materials: ResMut<Assets<TerrainMaterial>>,
     mut next_state: ResMut<NextState<RenderAppState>>,
 ) {
     let bounds = terrain.bounds;
     let (map_width, map_height) = map_world_size(bounds);
+    let material = materials.add(TerrainMaterial {
+        texture_array: textures.array_texture(),
+        params: TerrainMaterialParams::default(),
+    });
 
-    match config.terrain_renderer {
-        TerrainRenderer::VertexColor => {
-            let material = material_assets.color.add(ColorMaterial::from(Color::WHITE));
-            for origin in chunk_origins(bounds) {
-                let mesh = build_vertex_color_chunk_mesh(origin, &terrain);
-                commands.spawn((
-                    TerrainChunk,
-                    Mesh2d(meshes.add(mesh)),
-                    MeshMaterial2d(material.clone()),
-                    Transform::default(),
-                ));
-            }
-        }
-        TerrainRenderer::TextureArray => {
-            let texture = prepared_assets
-                .texture_array
-                .as_ref()
-                .expect("texture-array renderer assets must be prepared before chunk spawning")
-                .handle
-                .clone();
-            let material = material_assets
-                .texture_array
-                .add(TerrainTextureArrayMaterial::from_texture(texture));
-
-            for origin in chunk_origins(bounds) {
-                let mesh = build_texture_chunk_mesh(origin, &terrain);
-                commands.spawn((
-                    TerrainChunk,
-                    Mesh2d(meshes.add(mesh)),
-                    MeshMaterial2d(material.clone()),
-                    Transform::default(),
-                ));
-            }
-        }
-        TerrainRenderer::Terrain3d => {
-            let texture = prepared_assets
-                .texture_array_3d
-                .as_ref()
-                .expect("3D texture-array renderer assets must be prepared before chunk spawning")
-                .handle
-                .clone();
-            let material = material_assets
-                .texture_array_3d
-                .add(TerrainTextureArray3dMaterial::from_texture(texture));
-            let water_material = material_assets.standard.add(StandardMaterial {
-                base_color: Color::srgba(0.16, 0.42, 0.70, 0.55),
-                cull_mode: None,
-                alpha_mode: AlphaMode::Blend,
-                perceptual_roughness: 0.35,
-                ..Default::default()
-            });
-
-            for origin in chunk_origins(bounds) {
-                let mesh = build_terrain_3d_chunk_mesh(origin, &terrain);
-                commands.spawn((
-                    TerrainChunk,
-                    Mesh3d(meshes.add(mesh)),
-                    MeshMaterial3d(material.clone()),
-                    Transform::default(),
-                ));
-            }
-
-            commands.spawn((
-                Mesh3d(meshes.add(build_water_plane_mesh(bounds))),
-                MeshMaterial3d(water_material),
-                Transform::default(),
-            ));
-
-            let feature_models = prepared_assets
-                .feature_models
-                .as_ref()
-                .expect("feature model assets must be prepared before 3D chunk spawning");
-            spawn_feature_models(&mut commands, feature_models, &terrain);
-        }
+    for origin in chunk_origins(bounds) {
+        let mesh = build_terrain_chunk_mesh(origin, &terrain, TerrainMeshParams::default());
+        commands.spawn((
+            TerrainChunk,
+            Mesh3d(meshes.add(mesh)),
+            MeshMaterial3d(material.clone()),
+            Transform::default(),
+        ));
     }
 
-    info!(
-        "spawned terrain chunks for {}x{} map",
-        bounds.width(),
-        bounds.height()
-    );
     commands.insert_resource(MapRenderBounds {
         width: map_width,
         height: map_height,
     });
+
+    info!(
+        width = bounds.width(),
+        height = bounds.height(),
+        "spawned continuous terrain surface chunks"
+    );
     next_state.set(RenderAppState::Running);
+}
+
+fn build_texture_array(layer_handles: &[Handle<Image>], images: &Assets<Image>) -> Image {
+    let first = layer_handles
+        .first()
+        .and_then(|handle| images.get(handle))
+        .expect("terrain texture array requires at least one loaded layer");
+    let size = first.texture_descriptor.size;
+    let format = first.texture_descriptor.format;
+    let layer_data_len = first
+        .data
+        .as_ref()
+        .expect("loaded terrain texture has CPU pixel data")
+        .len();
+    let mut data = Vec::with_capacity(layer_data_len * layer_handles.len());
+
+    for handle in layer_handles {
+        let image = images
+            .get(handle)
+            .expect("terrain texture layer is loaded before array build");
+        assert_eq!(
+            image.texture_descriptor.size.width, size.width,
+            "terrain texture layers must share width"
+        );
+        assert_eq!(
+            image.texture_descriptor.size.height, size.height,
+            "terrain texture layers must share height"
+        );
+        assert_eq!(
+            image.texture_descriptor.format, format,
+            "terrain texture layers must share format"
+        );
+        let layer_data = image
+            .data
+            .as_ref()
+            .expect("loaded terrain texture has CPU pixel data");
+        assert_eq!(
+            layer_data.len(),
+            layer_data_len,
+            "terrain texture layers must share byte size"
+        );
+        data.extend_from_slice(layer_data);
+    }
+
+    let mut image = Image::new(
+        Extent3d {
+            width: size.width,
+            height: size.height,
+            depth_or_array_layers: u32::try_from(layer_handles.len())
+                .expect("terrain texture layer count fits in u32"),
+        },
+        TextureDimension::D2,
+        data,
+        format,
+        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+    );
+    image.sampler = ImageSampler::linear();
+    image.texture_view_descriptor = Some(TextureViewDescriptor {
+        dimension: Some(TextureViewDimension::D2Array),
+        ..Default::default()
+    });
+    image
 }
 
 fn chunk_origins(bounds: MapBounds) -> impl Iterator<Item = Coord> {

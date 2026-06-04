@@ -8,7 +8,7 @@ use bevy::{
     ecs::system::SystemParam,
     input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseButton},
     prelude::{
-        BackgroundColor, ButtonInput, Camera, Camera2d, Camera3d, Color, Commands, Component,
+        BackgroundColor, ButtonInput, Camera, Camera3d, Color, Commands, Component,
         GlobalTransform, KeyCode, Node, PositionType, Projection, Query, Res, ResMut, Resource,
         Text, TextColor, TextFont, Time, Timer, TimerMode, Transform, Val, Vec2, Vec3, With,
         default, px,
@@ -18,10 +18,7 @@ use bevy::{
 
 use crate::{
     input::cursor_to_coord,
-    rendering::{
-        RenderStartupConfig, TerrainRenderer, chunk_spawner::MapRenderBounds,
-        hex_mesh::tile_center_position,
-    },
+    rendering::{chunk_spawner::MapRenderBounds, hex_mesh::tile_center_position},
     sim::{StaticTerrain, TurnState},
 };
 
@@ -75,7 +72,6 @@ impl Default for FpsOverlayTimer {
 
 pub(crate) fn spawn_map_camera(
     mut commands: Commands,
-    config: Res<RenderStartupConfig>,
     map_bounds: Res<MapRenderBounds>,
     terrain: Res<StaticTerrain>,
 ) {
@@ -89,26 +85,15 @@ pub(crate) fn spawn_map_camera(
         },
     );
 
-    match config.terrain_renderer {
-        TerrainRenderer::VertexColor | TerrainRenderer::TextureArray => {
-            commands.spawn((
-                MapCamera,
-                Camera2d,
-                Transform::from_xyz(pivot.x, pivot.y, 1000.0),
-            ));
-        }
-        TerrainRenderer::Terrain3d => {
-            let orbit = CameraOrbit {
-                pivot,
-                distance: ORBIT_INITIAL_DISTANCE,
-                yaw: ORBIT_INITIAL_YAW,
-                pitch: ORBIT_INITIAL_PITCH,
-            };
-            let transform = orbit_transform(orbit);
-            commands.insert_resource(orbit);
-            commands.spawn((MapCamera, Camera3d::default(), transform));
-        }
-    }
+    let orbit = CameraOrbit {
+        pivot,
+        distance: ORBIT_INITIAL_DISTANCE,
+        yaw: ORBIT_INITIAL_YAW,
+        pitch: ORBIT_INITIAL_PITCH,
+    };
+    let transform = orbit_transform(orbit);
+    commands.insert_resource(orbit);
+    commands.spawn((MapCamera, Camera3d::default(), transform));
 }
 
 pub(crate) fn pan_camera(

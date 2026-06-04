@@ -11,16 +11,14 @@
 use bevy::{asset::AssetPlugin, prelude::*};
 use game::{
     input::InputPlugin,
-    rendering::{RenderStartupConfig, RenderingPlugin, TerrainRenderer},
+    rendering::{RenderStartupConfig, RenderingPlugin},
     sim::{SimPlugin, SimStartupConfig},
 };
 
 fn main() {
     App::new()
         .insert_resource(SimStartupConfig::default())
-        .insert_resource(RenderStartupConfig {
-            terrain_renderer: TerrainRenderer::Terrain3d,
-        })
+        .insert_resource(RenderStartupConfig)
         .add_plugins(DefaultPlugins.set(AssetPlugin {
             file_path: workspace_asset_path(),
             ..Default::default()

@@ -20,9 +20,7 @@ pub(crate) fn run_single_case(case: BenchCase) {
             ..WorldParams::default()
         },
     };
-    let render_config = RenderStartupConfig {
-        terrain_renderer: case.renderer.into(),
-    };
+    let render_config = RenderStartupConfig;
 
     App::new()
         .insert_resource(sim_config)

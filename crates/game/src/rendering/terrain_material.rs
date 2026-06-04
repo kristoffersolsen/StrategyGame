@@ -1,119 +1,86 @@
-//! Texture-array terrain materials for map rendering.
+//! Terrain surface material and vertex attributes.
 
 use bevy::{
-    asset::{load_internal_asset, uuid_handle},
-    image::{Image, ImageSampler},
+    asset::Asset,
+    image::Image,
+    mesh::{MeshVertexAttribute, MeshVertexBufferLayoutRef},
     pbr::{Material, MaterialPipeline, MaterialPipelineKey},
-    prelude::{App, Asset, Handle},
+    prelude::Handle,
     reflect::TypePath,
     render::render_resource::{
-        AsBindGroup, RenderPipelineDescriptor, SpecializedMeshPipelineError,
+        AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
+        VertexFormat,
     },
-    shader::{Shader, ShaderRef},
-    sprite_render::{Material2d, Material2dKey},
+    shader::ShaderRef,
 };
 
-use crate::rendering::hex_mesh::ATTRIBUTE_TEXTURE_INDEX;
+const TERRAIN_SURFACE_SHADER: &str = "shaders/terrain_surface.wgsl";
 
-const TERRAIN_TEXTURE_ARRAY_SHADER_HANDLE: Handle<Shader> =
-    uuid_handle!("91b7e9fd-22d8-4ddf-a0c9-2cd3d939a8ac");
-const TERRAIN_TEXTURE_ARRAY_3D_SHADER_HANDLE: Handle<Shader> =
-    uuid_handle!("9c98d93d-83f4-46b0-8e43-6b0c8f2d3d64");
+pub(crate) const ATTRIBUTE_TERRAIN_BLEND_LAYERS: MeshVertexAttribute =
+    MeshVertexAttribute::new("TerrainBlendLayers", 871_420_001, VertexFormat::Float32x4);
+pub(crate) const ATTRIBUTE_TERRAIN_BLEND_WEIGHTS: MeshVertexAttribute =
+    MeshVertexAttribute::new("TerrainBlendWeights", 871_420_002, VertexFormat::Float32x4);
 
-pub(crate) fn load_shader(app: &mut App) {
-    load_internal_asset!(
-        app,
-        TERRAIN_TEXTURE_ARRAY_SHADER_HANDLE,
-        "terrain_texture_array.wgsl",
-        Shader::from_wgsl
-    );
-    load_internal_asset!(
-        app,
-        TERRAIN_TEXTURE_ARRAY_3D_SHADER_HANDLE,
-        "terrain_texture_array_3d.wgsl",
-        Shader::from_wgsl
-    );
+/// Shader controls for the terrain surface material.
+#[derive(Debug, Clone, Copy, ShaderType)]
+pub(crate) struct TerrainMaterialParams {
+    slope_triplanar_start: f32,
+    slope_triplanar_end: f32,
+    texture_scale: f32,
+    ambient_light: f32,
 }
 
-/// Custom 2D material that samples terrain tiles from a texture array.
-#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
-pub(crate) struct TerrainTextureArrayMaterial {
-    #[texture(0, dimension = "2d_array")]
-    #[sampler(1)]
-    pub(crate) terrain_textures: Handle<Image>,
-}
-
-impl TerrainTextureArrayMaterial {
-    pub(crate) fn from_texture(terrain_textures: Handle<Image>) -> Self {
-        Self { terrain_textures }
+impl Default for TerrainMaterialParams {
+    fn default() -> Self {
+        Self {
+            slope_triplanar_start: 0.28,
+            slope_triplanar_end: 0.58,
+            texture_scale: 0.055,
+            ambient_light: 0.45,
+        }
     }
 }
 
-impl Material2d for TerrainTextureArrayMaterial {
+/// Material for blended biome terrain.
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+pub(crate) struct TerrainMaterial {
+    #[texture(0, dimension = "2d_array")]
+    #[sampler(1)]
+    pub(crate) texture_array: Handle<Image>,
+    #[uniform(2)]
+    pub(crate) params: TerrainMaterialParams,
+}
+
+impl Material for TerrainMaterial {
     fn vertex_shader() -> ShaderRef {
-        TERRAIN_TEXTURE_ARRAY_SHADER_HANDLE.into()
+        TERRAIN_SURFACE_SHADER.into()
     }
 
     fn fragment_shader() -> ShaderRef {
-        TERRAIN_TEXTURE_ARRAY_SHADER_HANDLE.into()
+        TERRAIN_SURFACE_SHADER.into()
     }
 
-    fn specialize(
-        descriptor: &mut RenderPipelineDescriptor,
-        layout: &bevy::mesh::MeshVertexBufferLayoutRef,
-        _key: Material2dKey<Self>,
-    ) -> Result<(), SpecializedMeshPipelineError> {
-        let vertex_layout = layout.0.get_layout(&[
-            bevy::prelude::Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
-            bevy::prelude::Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
-            bevy::prelude::Mesh::ATTRIBUTE_UV_0.at_shader_location(2),
-            ATTRIBUTE_TEXTURE_INDEX.at_shader_location(5),
-        ])?;
-        descriptor.vertex.buffers = vec![vertex_layout];
-        Ok(())
-    }
-}
-
-/// Custom 3D material that samples terrain from the authored texture array.
-#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
-pub(crate) struct TerrainTextureArray3dMaterial {
-    #[texture(0, dimension = "2d_array")]
-    #[sampler(1)]
-    pub(crate) terrain_textures: Handle<Image>,
-}
-
-impl TerrainTextureArray3dMaterial {
-    pub(crate) fn from_texture(terrain_textures: Handle<Image>) -> Self {
-        Self { terrain_textures }
-    }
-}
-
-impl Material for TerrainTextureArray3dMaterial {
-    fn vertex_shader() -> ShaderRef {
-        TERRAIN_TEXTURE_ARRAY_3D_SHADER_HANDLE.into()
+    fn enable_prepass() -> bool {
+        false
     }
 
-    fn fragment_shader() -> ShaderRef {
-        TERRAIN_TEXTURE_ARRAY_3D_SHADER_HANDLE.into()
+    fn enable_shadows() -> bool {
+        false
     }
 
     fn specialize(
         _pipeline: &MaterialPipeline,
         descriptor: &mut RenderPipelineDescriptor,
-        layout: &bevy::mesh::MeshVertexBufferLayoutRef,
+        layout: &MeshVertexBufferLayoutRef,
         _key: MaterialPipelineKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
         let vertex_layout = layout.0.get_layout(&[
             bevy::prelude::Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
             bevy::prelude::Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
-            bevy::prelude::Mesh::ATTRIBUTE_UV_0.at_shader_location(2),
-            ATTRIBUTE_TEXTURE_INDEX.at_shader_location(5),
+            ATTRIBUTE_TERRAIN_BLEND_LAYERS.at_shader_location(2),
+            ATTRIBUTE_TERRAIN_BLEND_WEIGHTS.at_shader_location(3),
         ])?;
         descriptor.vertex.buffers = vec![vertex_layout];
         Ok(())
     }
-}
-
-pub(crate) fn configure_placeholder_texture(image: &mut Image) {
-    image.sampler = ImageSampler::nearest();
 }

@@ -14,7 +14,7 @@ use bevy::{
 };
 
 use crate::{
-    rendering::{RenderStartupConfig, TerrainRenderer, hex_mesh::tile_center_position},
+    rendering::hex_mesh::tile_center_position,
     sim::{
         StaticTerrain, UnitMoved,
         units::{Unit, UnitCoord, UnitKind, UnitNetworkId},
@@ -36,18 +36,9 @@ pub(crate) struct UnitAssets {
 
 /// Loads unit GLB assets from disk.
 ///
-/// Only runs when the Terrain3d renderer is active; other renderers do not
-/// display unit models.
 // Bevy system parameters are always passed by value.
 #[allow(clippy::needless_pass_by_value)]
-pub(crate) fn load_unit_assets(
-    mut commands: Commands,
-    config: Res<RenderStartupConfig>,
-    asset_server: Res<AssetServer>,
-) {
-    if config.terrain_renderer != TerrainRenderer::Terrain3d {
-        return;
-    }
+pub(crate) fn load_unit_assets(mut commands: Commands, asset_server: Res<AssetServer>) {
     let settler = asset_server
         .load(GltfAssetLabel::Scene(0).from_asset("glb-assets/units/civilian/settler.glb"));
     commands.insert_resource(UnitAssets { settler });
@@ -62,20 +53,15 @@ pub(crate) struct UnitModel;
 
 /// Spawns a visual model entity for each unit sim entity.
 ///
-/// Runs once after settlers are spawned. Only active in Terrain3d mode;
-/// returns early for other renderers.
+/// Runs once after settlers are spawned.
 // Bevy system parameters are always passed by value.
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) fn spawn_unit_models(
     mut commands: Commands,
-    config: Res<RenderStartupConfig>,
     terrain: Res<StaticTerrain>,
     unit_assets: Option<Res<UnitAssets>>,
     units: Query<(Entity, &UnitNetworkId, &UnitCoord, &UnitKind), With<Unit>>,
 ) {
-    if config.terrain_renderer != TerrainRenderer::Terrain3d {
-        return;
-    }
     let Some(unit_assets) = unit_assets else {
         return;
     };

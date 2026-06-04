@@ -17,6 +17,7 @@ use coords::Coord;
 use crate::sim::{
     commands::PlayerId,
     network_id::{EntityLookup, NetworkId, NetworkIdAllocator},
+    terrain::{EdgeClass, edge_class},
     terrain::{IMPASSABLE, StaticTerrain},
     turn_phase::TurnState,
     world_model::TileState,
@@ -157,6 +158,10 @@ pub(crate) fn reachable_tiles(
         }
 
         for neighbor in terrain.bounds.neighbors(current).into_iter().flatten() {
+            if edge_class(current, neighbor, terrain) == EdgeClass::Cliff {
+                continue;
+            }
+
             let move_cost = terrain
                 .movement_cost
                 .get(neighbor)
@@ -294,6 +299,22 @@ mod tests {
         assert!(
             !result.contains_key(&blocked),
             "impassable tile must not appear in reachable set"
+        );
+    }
+
+    #[test]
+    fn cliff_edges_are_excluded() {
+        let bounds = MapBounds::new(8, 8);
+        let mut terrain = passable_terrain(bounds);
+        let tile_state = TileState::new(bounds);
+        let from = Coord::new(3, 3);
+        let cliff_neighbor = Coord::new(4, 3);
+        terrain.height_level.set(cliff_neighbor, 4);
+
+        let result = reachable_tiles(from, 5, &terrain, &tile_state);
+        assert!(
+            !result.contains_key(&cliff_neighbor),
+            "delta >= 2 edge must not appear in reachable set"
         );
     }
 
