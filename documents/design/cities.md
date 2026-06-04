@@ -65,25 +65,101 @@ Further growth into larger administrative tiers (regional capital, metropolis) f
 - Decide whether "capital" is a mobile designation (e.g., largest/most-connected city gets administrative bonuses) or just descriptive.
 
 ### 2.6 The Four Dimensions of Growth
-**Decision:** Growth is multidimensional, not a single "size" number. Four independent axes, each grounded in a specific mechanism:
+**Decision:** Growth is multidimensional, not a single "size" number. Four
+independent axes, each grounded in a specific mechanism:
 
-1. **Population** — driven by food supply and housing-district capacity. Population thresholds gate promotion to higher administrative tiers (§2.12).
-2. **Footprint** — the settlement's claimed-tile area (§2.13, §2.14). Grows with population (working assumption). Cheap and fast relative to development; mostly determined by geography and neighbors.
-3. **Development** — districts built on land within the center building's gated radius (§2.13). Expensive and slow, driven by production and materials. Distinct from footprint: a settlement can claim many tiles without developing them.
-4. **Specialization** — chosen at outpost founding via the center building (§2.12); reinforced by subsequent district choices (farming district near a farming outpost, etc.). Can be reconfigured by replacing the center building.
+1. **Population** — driven by food supply and housing-district capacity.
+   Population thresholds gate promotion to higher administrative tiers (§2.12),
+   and population drives footprint growth (see growth-loop resolution below).
+2. **Footprint** — the settlement's claimed-tile area (§2.13, §2.14). Grows with
+   population. Cheap and fast relative to development; its extent and direction
+   are shaped by geography, neighbors, and specialization.
+3. **Development** — districts built on land within the center building's gated
+   radius (§2.13). Expensive and slow, driven by production and materials.
+   Distinct from footprint: a settlement can claim many tiles without developing
+   them.
+4. **Specialization** — chosen at outpost founding via the center building
+   (§2.12); reinforced by subsequent district choices (farming district near a
+   farming outpost, etc.). Can be reconfigured by replacing the center building.
 
-**Rationale:** A trading hub and a mining town aren't differentiated by "size" — they differ on each of these axes independently. The settlement model in §2.12–§2.14 produces these differences from a single mechanism set, rather than treating them as separate stats to balance.
+**Growth-loop resolution.** Population is simultaneously an output and an input.
+It is produced by food (worked footprint) and housing (development), and it in
+turn drives footprint via population-threshold ring expansion (§2.13). The loop
+is: food + housing → population → more footprint, bounded by finite good
+farmland (terrain), housing requiring deliberate district investment, and the
+per-tier claim-radius cap (§2.14). This gives a deliberate split between the two
+spatial axes: footprint (cheap) trails population mostly automatically, while
+housing and other development (expensive) is the player's deliberate decision.
 
-**Future aspects:**
-- **Interactions between the four dimensions remain partially open.** Population now explicitly gates promotion (and via that, district radius); the assumption that population drives footprint growth is working but not locked. Whether development can outrun population (cosmetic build-out of empty districts) needs a deliberate decision.
+Development may outrun population only **within the current tier's radius cap**.
+Across tiers, population hard-gates development: promotion to a larger radius
+requires a population threshold (§2.12), so a settlement cannot build a
+city-scale district count on outpost-scale population. Within-tier overbuilding
+(filling district slots faster than population justifies) is not hard-blocked and
+is not policed by an elapsed-turn timer. It is bounded by maintenance cost
+(empty districts are a net drain) and, pending §2.7, by staffing (an unstaffed
+district produces nothing). If a decay mechanic proves necessary after §2.7 is
+resolved, it attaches to a learnable cause — unmet maintenance or lack of
+staffing population — never to elapsed turns, consistent with pillar 0.2.
+
+
+**Rationale:** A trading hub and a mining town aren't differentiated by "size" —
+they differ on each axis independently. The settlement model in §2.12–§2.14
+produces these differences from a single mechanism set rather than treating them
+as separate stats to balance. Making population the single growth driver reuses
+a well-understood loop rather than inventing a parallel one, and the cheap/
+expensive split between footprint and development is what makes the two spatial
+axes feel distinct in play. Rejecting the elapsed-turn derelict timer keeps the
+limiter tied to cause (pillar 0.2) and avoids per-district manual repair tedium
+(pillar 0.6); maintenance and staffing already disincentivize overbuilding
+without a third penalty.
+
+**Risks:**
+- Within-tier overbuild pressure depends on §2.7. If the production model does
+  not couple yield to staffing, maintenance alone may be too weak a limiter and
+  the question reopens.
+- Population-driven auto-claim can surprise the player if the "best next tile"
+  heuristic doesn't match intent.
+
+**Mitigations:**
+- The §2.7 resolution should be evaluated against this section: the job-slot
+  model (buildings create slots, population fills them) makes the population↔
+  development relationship fall out for free and is the leading hypothesis.
+- Auto-claim's next-tile selection must use a deterministic tiebreak (pillar
+  0.4) and surface an "expand toward" directive plus per-tile override (§0.6,
+  §2.13).
+
+**Open questions:**
+- Specialization-as-geography influence (§2.12 open question) is independent of
+  the growth loop and remains open.
 
 ### 2.7 Production Model
 **Status:** Not finalized.
 
 The conventional "two queues (units, buildings)" model was challenged. The current direction leans away from it toward something closer to **resource allocation** (production capacity split by priority/policy) or Stellaris-style **job allocation** (jobs produce resources, buildings create job slots).
 
+**Gold is empire-wide; bulk goods are not — a deliberate scope asymmetry.** Gold
+(currency) accumulates at the empire level because currency is fungible and pools
+at the polity level. Building materials and food do not: they are bulk goods,
+provisionally city-local (see open question below). Two scope models coexist in
+one economy by design. Gold is yield-only with no sink in the Ancient era (a
+deliberate stub; `resources.md` §6). Do not infer from "empire-wide gold" that
+materials follow — they do not.
+
+- Whether build-slots draw from a single region materials pool or a city-local
+  stock. Still open, interacts with regions/infrastructure (§2.9). Resolved for
+  gold only: gold is empire-wide (`resources.md` §6); the materials scope is
+  independent of that decision.
+
 **Future aspects:**
 - Pick a production/allocation model. This is gated on the four-dimensions interactions discussion.
+
+### 2.8 Expansion vs Development
+**Decision:** Claiming a tile (expansion) and building on a tile (development) are **separate actions** with separate costs.
+
+**Rationale:** Conflating them (Civ 6) makes optimal play "always claim aggressively because claiming = function." Separating them lets territory be claimed speculatively/defensively while real investment is reserved for development. Also makes claimed-but-undeveloped territory worth fighting over.
+
+The concrete spatial separation is specified in §2.13: expansion claims tiles, development places districts.
 
 ### 2.8 Expansion vs Development
 **Decision:** Claiming a tile (expansion) and building on a tile (development) are **separate actions** with separate costs.
