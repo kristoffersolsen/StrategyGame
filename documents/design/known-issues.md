@@ -157,3 +157,16 @@ Each is reasonable in isolation. Together, late-game turn processing could becom
 - When starting position adequacy can't be satisfied for N players, what happens? The doc says "fail honestly" but doesn't specify behavior — refuse to generate? Generate with warning? Reduce player count automatically?
 
 **Status:** Minor but needs resolution before generation pipeline is exposed to the player. Tractable; just needs explicit design.
+
+### Others
+
+- **Gold has no sink.** Gold accumulates empire-wide and is yield-only; nothing
+  spends it yet (`resources.md` §6). The sink side — gold-payable maintenance,
+  unit upkeep, purchasing — is undesigned. The accumulator looks complete and is
+  not. Resolve when the treasury/economy sink system is designed.
+- **Amenity system is structurally complete but untuned.** Per-luxury amenity
+  amount, demand-per-population curve, and growth bonus/penalty magnitudes are
+  placeholders (`resources.md` §5). Deficit penalty stays weak until later eras.
+- **Worker / tile-improvement verb set undesigned.** It is the deposit-to-yield
+  bridge (`resources.md` §7); until designed, no deposit produces a yield. Next
+  system in the dependency chain.
