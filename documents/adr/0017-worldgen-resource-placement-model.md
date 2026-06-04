@@ -219,3 +219,14 @@ as the plate assignment).
 - `assets/worldgen/resources.ron` — resource config (created in
   Stage 3.5)
 - ADR-0016 — biome table as data asset (precedent for RON data assets)
+
+## Amendment — 2026-06-03: luxury interchangeability is amenity-only
+
+The original characterization that "all luxuries provide equivalent happiness
+bonuses and are interchangeable" holds **for amenities only**. The resource
+economic model (`resources.md` §4) gives each luxury a differentiated secondary
+yield (food, materials, or currency), so luxuries are *not* interchangeable for
+yields. This is an economic-role addition; it does not change placement — the
+generation algorithm, categories, and config schema are untouched. Two new
+content entries follow from the economic model: `Copper` (Strategic) and `Tin`
+(Luxury), added per the existing category structure with no algorithm change.
