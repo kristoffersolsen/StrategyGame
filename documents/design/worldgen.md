@@ -416,11 +416,14 @@ deterministic `BTreeMap<Biome, Biome>`. See ADR-0016.
 **Decision:** Geological resource placement using plate data and biome filtering. Luxuries cluster by plate ("mineral character"); strategics partially cluster, mostly biome-distributed. Order: resources placed *before* starting positions (see 1.14 for the player-fairness mechanism that doesn't require inverting this order).
 
 **Resource categories:**
-- **Strategic:** iron, horses, coal, oil (later-tech), uranium (very late)
-- **Luxury:** gems, spices, silk, wine, gold
+- **Strategic:** copper (ancient-tier material), iron, horses, coal, oil
+  (later-tech), uranium (very late)
+- **Luxury:** gems, spices, silk, wine, gold, tin
 - **Bonus:** wheat, cattle, fish, deer, stone
 
-Specific resource list is content/balance data, expected to evolve.
+Specific resource list is content/balance data, expected to evolve. The
+*economic role* of each resource (yields, material tiers, amenities, gates) is
+defined in `resources.md`, not here — this stage owns placement only.
 
 **Per-resource rules (RON config):**
 - Eligible biomes/terrain
