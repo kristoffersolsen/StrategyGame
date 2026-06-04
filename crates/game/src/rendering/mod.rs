@@ -5,6 +5,7 @@ mod chunk_spawner;
 pub(crate) mod hex_mesh;
 mod lighting;
 mod terrain_layer;
+mod terrain_material;
 pub mod terrain_surface;
 
 pub(crate) use hex_mesh::HEX_SIZE;
@@ -35,6 +36,7 @@ impl Plugin for RenderingPlugin {
             .add_systems(
                 OnEnter(RenderAppState::SpawningChunks),
                 (
+                    chunk_spawner::spawn_chunks,
                     camera::spawn_map_camera,
                     lighting::spawn_lighting,
                     camera::spawn_fps_overlay,

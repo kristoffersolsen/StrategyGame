@@ -13,8 +13,8 @@ Expand it as new pub items land in `crates/game/src/lib.rs`.
 pub struct RenderingPlugin;  // implements bevy::prelude::Plugin
 ```
 
-Registers: the terrain render-layer scaffold, camera controls, lighting, and FPS
-overlay diagnostics. Add to a Bevy `App` before calling `app.run()`.
+Registers: chunked terrain surface rendering, camera controls, lighting, and
+FPS overlay diagnostics. Add to a Bevy `App` before calling `app.run()`.
 
 Expects `RenderStartupConfig` to be inserted as a resource before `SpawningChunks` state
 is entered. `init_resource::<RenderStartupConfig>()` is called by the plugin, so the

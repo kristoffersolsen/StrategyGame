@@ -3,9 +3,8 @@
 Interactive map-rendering harness for the Bevy terrain renderer.
 
 `maprender` launches the reusable `game::rendering` plugin against a generated
-world, or launches isolated rendering prototypes. After the terrain R0 teardown,
-the generated-map path intentionally shows the camera, lighting, sky, overlays,
-and an empty terrain layer scaffold.
+world, or launches isolated rendering prototypes. The generated-map path shows
+the chunked continuous terrain surface with camera, lighting, and diagnostics.
 
 Use `mapdump` for static PNGs, `maptest` for multi-seed worldgen comparisons,
 and `maprender` when you need the Bevy renderer or a rendering prototype.
@@ -13,7 +12,7 @@ and `maprender` when you need the Bevy renderer or a rendering prototype.
 ## Quick Start
 
 ```bash
-# Run the generated-map scaffold:
+# Run the generated-map renderer:
 cargo run --release -p maprender -- \
     --preset tools/maprender/presets/default.ron
 

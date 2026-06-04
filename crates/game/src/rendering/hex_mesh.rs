@@ -2,7 +2,7 @@
 
 use coords::{Coord, MapBounds};
 
-use crate::sim::terrain::StaticTerrain;
+use crate::{rendering::terrain_surface::tier_height, sim::terrain::StaticTerrain};
 
 /// Circumradius of one pointy-top hex in world units.
 pub(crate) const HEX_SIZE: f32 = 16.0;
@@ -14,10 +14,15 @@ pub(crate) fn map_world_size(bounds: MapBounds) -> (f32, f32) {
     (width, height)
 }
 
-/// Returns the center point for a tile on the current flat placeholder plane.
+/// Returns the center point for a tile on the terrain tier surface.
 pub(crate) fn tile_center_position(terrain: &StaticTerrain, coord: Coord) -> [f32; 3] {
     let center = hex_center(coord, terrain.bounds);
-    [center[0], center[1], 0.0]
+    let height_level = terrain.height_level.get(coord).copied().unwrap_or(0);
+    [
+        center[0],
+        center[1],
+        tier_height(height_level, terrain.mountain_level),
+    ]
 }
 
 pub(crate) fn hex_center(coord: Coord, bounds: MapBounds) -> [f32; 2] {
