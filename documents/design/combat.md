@@ -409,3 +409,83 @@ Tactical model, unit interface, scale/representation, archetypes, veterancy/hero
 - **Naval combat:** separate system or unified with land combat. Interacts with map shape (archipelago vs. continents).
 - **Air combat:** if included at all, when in the tech tree, and how integrated.
 - **Hierarchical orders (v2+ consideration):** designate one unit as commander, others follow. Adds tactical depth beyond batch commands. Not v1.
+
+### 3.13 Unit Composition: Chassis and Components
+
+**Decision:** A unit is a **base chassis** plus equippable **components**
+(weapons, armor; more component classes in later eras). The chassis is the unit
+type — it defines the archetype and role (§3.6) and is always buildable from
+base-tier materials. Components are the resource-gated augments: they scale a
+unit's magnitude and add situational modifiers *within* its archetype, and they
+are where higher-tier resources (bronze, then iron, etc.) attach to the unit
+model. Research of incremental same-archetype units (Warrior → "better melee" →
+"better melee again") is replaced by research of weapons and armor lines.
+Research of new *types* (e.g., siege in the Classical era) remains.
+
+**Invariants.**
+
+- **Chassis is the critical path.** Every archetype's base chassis is buildable
+  without higher-tier resources. Components gate strength and efficiency, never
+  progression. This is the unit-level expression of the §2.7 / §1.16 resource
+  gate: an unlucky start with no copper fields is weaker, not stuck.
+- **Components tune within an archetype, never across it.** Armor makes a melee
+  unit a tankier melee unit; no loadout may let a unit defeat its soft-RPS
+  counter (§3.6). Role comes from the chassis; components scale magnitude and add
+  situational modifiers inside that role. This is a hard invariant, not a tuning
+  target — if a loadout can cross the triangle, composition stops mattering and
+  §3.6 collapses.
+- **Customization is intent-level (§0.6).** The player designs a **loadout
+  template**; units are built to the active template; doctrine can set templates
+  army-wide (§3.3). The player never kits individual units by hand. Manual
+  per-unit equipping is the override, not the primary interface — the same
+  manual-as-override pattern as §2.7 allocation and §3.3 standing orders.
+- **Re-equipping is the upgrade mechanism (§3.9).** Swapping components onto an
+  existing unit is how units advance, preserving veterancy and hero status
+  rather than replacing the unit. Re-equip happens at a city or within supply
+  range (§3.11), not free in the field.
+
+**Ancient-era scope.** Base chassis (warrior, spearman, archer; plus the
+non-combat worker, scout, settler) plus a **single bronze augment tier**. Bronze
+is the era's defining material, so "base chassis + one bronze component" is both
+the simple system the era wants and thematically exact. The full multi-slot
+component designer blooms in the Classical era and later (iron, then specialized
+component classes). The general model is settled now; the ancient era implements
+only the single-augment slice.
+
+**Rationale.** Collapses an N×M redundant tech ladder (every archetype × every
+strength tier) into orthogonal component lines researched once — fewer techs,
+more meaningful ones, and it is the natural home for the §2.7 resource gate.
+Re-equip-as-upgrade reuses §3.9 rather than adding a parallel mechanism (§0.5).
+Intent-level loadouts head off the per-unit kitting tedium that forced
+auto-design buttons in comparable games — the §0.6 failure mode, anticipated
+rather than patched.
+
+**Risks.**
+
+- Per-unit kitting tedium if the model is built manual-first and templates are
+  retrofitted.
+- A loadout that crosses the archetype boundary silently breaks soft-RPS.
+- Legibility loss. A named ladder (Warrior → Swordsman → Legion) tells the player
+  what beats what at a glance; "bronze weapons, tier 2" is more abstract and a
+  less visceral unlock reward. Pandora-style abstraction loses players who want
+  the named milestone.
+
+**Mitigations.**
+
+- Design the template/doctrine layer as the primary interface from the start;
+  manual equipping is the override.
+- The within-archetype invariant is enforced in the model, not left to tuning.
+- **Name loadouts** so research still delivers a *named unit* (a bronze-equipped
+  spearman surfaces as a named unit, not a stat delta), recovering the
+  milestone reward while keeping the orthogonal-component structure.
+
+**Open questions.**
+
+- Component slot count per era (ancient = 1; later multi-slot). Tuning.
+- Whether component research lines (weapon, armor) are fully orthogonal to type
+  research or interleaved. Leaning orthogonal.
+- Exact re-equip cost and the city-vs-supply location rule — pin alongside the
+  supply detail in §3.11.
+- This partially pre-designs the (still-undesigned) tech tree: techs now unlock
+  *types plus components*, not unit tiers. Flagged so the tree stays consistent
+  when it's designed.
