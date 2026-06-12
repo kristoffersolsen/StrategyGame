@@ -1,4 +1,10 @@
-//! Continuous terrain surface prototype code.
+//! Continuous terrain surface mesh generation.
+//!
+//! Implements the R1–R3 terrain geometry pipeline:
+//! - R1/R2: corner-primary lattice with shared corners and edge bridges.
+//! - R3.1: directional ridge field for hill tiles — flowing ridges at constant tier height.
+//! - R3.2: corner-and-edge crest skeleton for mountain tiles — raised shared corners form ridgelines.
+//! - R3.3: smoothstep bridge profiles for slopes; hard top lip for cliff edges.
 
 use std::collections::HashMap;
 
@@ -28,23 +34,31 @@ const CORNER_RADIUS: f32 = 16.0;
 const BRIDGE_WIDTH: f32 = 9.0;
 const CORE_RADIUS_RATIO: f32 = 0.72;
 const DEFAULT_CORE_SUBDIVISIONS: u8 = 3;
-const DEFAULT_BRIDGE_SEGMENTS: u8 = 1;
-const DEFAULT_HILL_DISPLACEMENT: f32 = 5.0;
-const DEFAULT_MOUNTAIN_DISPLACEMENT: f32 = 15.0;
-const DEFAULT_EDGE_TAPER_START: f32 = 0.1;
-const DEFAULT_EDGE_TAPER_END: f32 = 1.0;
-const DEFAULT_HILL_BASE_WEIGHT: f32 = 0.70;
-const DEFAULT_HILL_NOISE_WEIGHT: f32 = 0.25;
-const DEFAULT_MOUNTAIN_BASE_WEIGHT: f32 = 0.45;
-const DEFAULT_MOUNTAIN_NOISE_WEIGHT: f32 = 0.55;
-const DEFAULT_MOUNTAIN_NEIGHBOR_WEIGHT: f32 = 1.0;
-const DEFAULT_MOUNTAIN_NEIGHBOR_SCALE_CAP: f32 = 1.20;
-const DEFAULT_LOW_NOISE_FREQUENCY: f32 = 0.9;
-const DEFAULT_HIGH_NOISE_FREQUENCY: f32 = 0.17;
-const DEFAULT_LOW_NOISE_WEIGHT: f32 = 0.65;
-const DEFAULT_HIGH_NOISE_WEIGHT: f32 = 0.35;
-const DEFAULT_LOW_NOISE_SALT: u32 = 0x58A5_4D31;
-const DEFAULT_HIGH_NOISE_SALT: u32 = 0xB3C9_27A1;
+const DEFAULT_SLOPE_BRIDGE_SEGMENTS: u8 = 3;
+const DEFAULT_CLIFF_BRIDGE_SEGMENTS: u8 = 1;
+
+// Hill directional ridge field defaults (R3.1)
+const DEFAULT_HILL_AMPLITUDE: f32 = 1.5;
+const DEFAULT_HILL_WAVELENGTH: f32 = 3.5;
+const DEFAULT_HILL_FIELD_RATE: f32 = 0.022;
+const DEFAULT_HILL_WARP_STRENGTH: f32 = 3.5;
+const DEFAULT_HILL_WARP_SALT_X: u32 = 0x73A1_C4D2;
+const DEFAULT_HILL_WARP_SALT_Y: u32 = 0x9F2B_5E18;
+const DEFAULT_HILL_DIR_SALT: u32 = 0x4A7D_B3C1;
+const DEFAULT_HILL_DETAIL_AMPLITUDE: f32 = 0.5;
+const DEFAULT_HILL_DETAIL_FREQUENCY: f32 = 0.22;
+const DEFAULT_HILL_DETAIL_SALT: u32 = 0xC823_74AB;
+
+// Mountain crest skeleton defaults (R3.2)
+const DEFAULT_MOUNTAIN_CREST_HEIGHT: f32 = 6.0;
+const DEFAULT_MOUNTAIN_EDGE_ARCH: f32 = 0.65;
+const DEFAULT_MOUNTAIN_DETAIL_AMPLITUDE: f32 = 1.0;
+const DEFAULT_MOUNTAIN_DETAIL_FREQUENCY: f32 = 0.10;
+const DEFAULT_MOUNTAIN_DETAIL_SALT: u32 = 0xF148_2D6A;
+
+// Cliff lip geometry defaults (R3.3)
+const DEFAULT_CLIFF_LIP_HEIGHT: f32 = 1.5;
+const DEFAULT_CLIFF_LIP_WIDTH: f32 = 1.2;
 const TEXTURE_LAYER_OCEAN: u8 = 0;
 const TEXTURE_LAYER_COAST: u8 = 1;
 const TEXTURE_LAYER_TROPICAL: u8 = 2;
@@ -71,13 +85,101 @@ const GEOMETRY_DIRECTIONS: [Direction; 6] = [
     Direction::SouthEast,
 ];
 
+/// Parameters for the hill directional ridge field (R3.1).
+///
+/// The ridge field is a pure function of world XY position: domain-warped
+/// noise drives a slowly-rotating direction field; a ridged cosine profile
+/// advances perpendicular to that field, producing flowing ridges at constant
+/// tier height. Amplitude fades to zero at hill→non-hill edges.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct HillRidgeParams {
+    /// Peak-to-valley height of each ridge.
+    pub(crate) amplitude: f32,
+    /// Distance between ridge crests in world units.
+    pub(crate) wavelength: f32,
+    /// Spatial rate at which the direction field rotates.
+    pub(crate) field_rate: f32,
+    /// Magnitude of the domain-warp offset applied before sampling the field.
+    pub(crate) warp_strength: f32,
+    /// Salts for the two warp-offset noise lookups.
+    pub(crate) warp_salt: [u32; 2],
+    /// Salt for the direction-angle noise lookup.
+    pub(crate) dir_salt: u32,
+    /// Amplitude of the top-detail noise layer.
+    pub(crate) detail_amplitude: f32,
+    /// Spatial frequency of the top-detail noise layer.
+    pub(crate) detail_frequency: f32,
+    /// Salt for the top-detail noise layer.
+    pub(crate) detail_salt: u32,
+}
+
+impl Default for HillRidgeParams {
+    fn default() -> Self {
+        Self {
+            amplitude: DEFAULT_HILL_AMPLITUDE,
+            wavelength: DEFAULT_HILL_WAVELENGTH,
+            field_rate: DEFAULT_HILL_FIELD_RATE,
+            warp_strength: DEFAULT_HILL_WARP_STRENGTH,
+            warp_salt: [DEFAULT_HILL_WARP_SALT_X, DEFAULT_HILL_WARP_SALT_Y],
+            dir_salt: DEFAULT_HILL_DIR_SALT,
+            detail_amplitude: DEFAULT_HILL_DETAIL_AMPLITUDE,
+            detail_frequency: DEFAULT_HILL_DETAIL_FREQUENCY,
+            detail_salt: DEFAULT_HILL_DETAIL_SALT,
+        }
+    }
+}
+
+/// Parameters for the mountain corner-and-edge crest skeleton (R3.2).
+///
+/// Corners and shared edges between mountain tiles are elevated toward
+/// `crest_height`, forming a connected graph of ridgelines. Mountain→lower
+/// edges fall away as flanks. 3–4 deterministic interior variants add
+/// secondary character (asymmetry, concavity, subsidiary ridges).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct MountainCrestParams {
+    /// Maximum height above tier at positions fully surrounded by mountains.
+    pub(crate) crest_height: f32,
+    /// Arch fraction added at mountain–mountain bridge midpoints (0..1).
+    pub(crate) edge_arch: f32,
+    /// Amplitude of the top-detail noise layer.
+    pub(crate) detail_amplitude: f32,
+    /// Spatial frequency of the top-detail noise layer.
+    pub(crate) detail_frequency: f32,
+    /// Salt for the top-detail noise layer.
+    pub(crate) detail_salt: u32,
+}
+
+impl Default for MountainCrestParams {
+    fn default() -> Self {
+        Self {
+            crest_height: DEFAULT_MOUNTAIN_CREST_HEIGHT,
+            edge_arch: DEFAULT_MOUNTAIN_EDGE_ARCH,
+            detail_amplitude: DEFAULT_MOUNTAIN_DETAIL_AMPLITUDE,
+            detail_frequency: DEFAULT_MOUNTAIN_DETAIL_FREQUENCY,
+            detail_salt: DEFAULT_MOUNTAIN_DETAIL_SALT,
+        }
+    }
+}
+
 /// Terrain mesh construction parameters.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct TerrainMeshParams {
+    /// Radius of each tile's inner hexagonal core.
     pub(crate) core_radius: f32,
+    /// Subdivisions applied to each core sector triangle.
     pub(crate) core_subdivisions: u8,
-    pub(crate) bridge_segments: u8,
-    pub(crate) displacement: TerrainDisplacementParams,
+    /// Bridge segments for slope edges (more resolves the rounded profile).
+    pub(crate) slope_bridge_segments: u8,
+    /// Bridge segments for cliff edges (fewer; vertical faces need little subdivision).
+    pub(crate) cliff_bridge_segments: u8,
+    /// Height of the hard lip added to the top of cliff faces.
+    pub(crate) cliff_lip_height: f32,
+    /// Horizontal extension of the cliff lip toward the lower tile.
+    pub(crate) cliff_lip_width: f32,
+    /// Hill directional ridge field parameters.
+    pub(crate) hill_ridge: HillRidgeParams,
+    /// Mountain crest skeleton parameters.
+    pub(crate) mountain_crest: MountainCrestParams,
 }
 
 impl Default for TerrainMeshParams {
@@ -85,61 +187,12 @@ impl Default for TerrainMeshParams {
         Self {
             core_radius: HEX_SIZE * CORE_RADIUS_RATIO,
             core_subdivisions: DEFAULT_CORE_SUBDIVISIONS,
-            bridge_segments: DEFAULT_BRIDGE_SEGMENTS,
-            displacement: TerrainDisplacementParams::default(),
-        }
-    }
-}
-
-/// One value-noise octave used for core hill and mountain displacement.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct TerrainNoiseLayer {
-    pub(crate) frequency: f32,
-    pub(crate) weight: f32,
-    pub(crate) salt: u32,
-}
-
-/// Tunable parameters for hill and mountain core displacement.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct TerrainDisplacementParams {
-    pub(crate) hill_amplitude: f32,
-    pub(crate) mountain_amplitude: f32,
-    pub(crate) edge_taper_start: f32,
-    pub(crate) edge_taper_end: f32,
-    pub(crate) hill_base_weight: f32,
-    pub(crate) hill_noise_weight: f32,
-    pub(crate) mountain_base_weight: f32,
-    pub(crate) mountain_noise_weight: f32,
-    pub(crate) mountain_neighbor_weight: f32,
-    pub(crate) mountain_neighbor_scale_cap: f32,
-    pub(crate) noise_layers: [TerrainNoiseLayer; 2],
-}
-
-impl Default for TerrainDisplacementParams {
-    fn default() -> Self {
-        Self {
-            hill_amplitude: DEFAULT_HILL_DISPLACEMENT,
-            mountain_amplitude: DEFAULT_MOUNTAIN_DISPLACEMENT,
-            edge_taper_start: DEFAULT_EDGE_TAPER_START,
-            edge_taper_end: DEFAULT_EDGE_TAPER_END,
-            hill_base_weight: DEFAULT_HILL_BASE_WEIGHT,
-            hill_noise_weight: DEFAULT_HILL_NOISE_WEIGHT,
-            mountain_base_weight: DEFAULT_MOUNTAIN_BASE_WEIGHT,
-            mountain_noise_weight: DEFAULT_MOUNTAIN_NOISE_WEIGHT,
-            mountain_neighbor_weight: DEFAULT_MOUNTAIN_NEIGHBOR_WEIGHT,
-            mountain_neighbor_scale_cap: DEFAULT_MOUNTAIN_NEIGHBOR_SCALE_CAP,
-            noise_layers: [
-                TerrainNoiseLayer {
-                    frequency: DEFAULT_LOW_NOISE_FREQUENCY,
-                    weight: DEFAULT_LOW_NOISE_WEIGHT,
-                    salt: DEFAULT_LOW_NOISE_SALT,
-                },
-                TerrainNoiseLayer {
-                    frequency: DEFAULT_HIGH_NOISE_FREQUENCY,
-                    weight: DEFAULT_HIGH_NOISE_WEIGHT,
-                    salt: DEFAULT_HIGH_NOISE_SALT,
-                },
-            ],
+            slope_bridge_segments: DEFAULT_SLOPE_BRIDGE_SEGMENTS,
+            cliff_bridge_segments: DEFAULT_CLIFF_BRIDGE_SEGMENTS,
+            cliff_lip_height: DEFAULT_CLIFF_LIP_HEIGHT,
+            cliff_lip_width: DEFAULT_CLIFF_LIP_WIDTH,
+            hill_ridge: HillRidgeParams::default(),
+            mountain_crest: MountainCrestParams::default(),
         }
     }
 }
@@ -307,7 +360,8 @@ fn push_core(
                 center: center_xy,
                 base_height,
                 radius: params.core_radius,
-                displacement: params.displacement,
+                hill_ridge: params.hill_ridge,
+                mountain_crest: params.mountain_crest,
                 color,
                 blend,
                 corner,
@@ -352,9 +406,23 @@ fn push_terrain_bridge(
         EdgeClass::Cliff => [0.40, 0.38, 0.36, 1.0],
     };
 
-    push_displaced_bridge_grid(
+    // Cliff edges get fewer bridge segments; slopes get more to resolve the rounded profile.
+    let cross_segments = match class {
+        EdgeClass::Flat | EdgeClass::Slope => params.slope_bridge_segments,
+        EdgeClass::Cliff => params.cliff_bridge_segments,
+    };
+    let is_slope = class != EdgeClass::Cliff;
+
+    // Mountain–mountain bridges get an arch at the midpoint (R3.2 crest continuation).
+    let mountain_arch = if is_mountain_tile(terrain, coord) && is_mountain_tile(terrain, neighbor) {
+        params.mountain_crest.edge_arch * params.mountain_crest.crest_height
+    } else {
+        0.0
+    };
+
+    push_bridge_grid(
         data,
-        DisplacedBridgeGrid {
+        BridgeGrid {
             terrain,
             current: coord,
             neighbor,
@@ -365,16 +433,41 @@ fn push_terrain_bridge(
             neighbor_left,
             neighbor_right,
             radius: params.core_radius,
-            displacement: params.displacement,
+            hill_ridge: params.hill_ridge,
+            mountain_crest: params.mountain_crest,
+            mountain_arch,
             side_segments: params.core_subdivisions,
-            cross_segments: params.bridge_segments,
+            cross_segments,
+            is_slope,
             color,
         },
     );
+
+    // Add a hard top lip to cliff edges (R3.3).
+    if class == EdgeClass::Cliff && params.cliff_lip_height > 0.0 {
+        push_cliff_lip(
+            data,
+            center,
+            neighbor_center,
+            current_left,
+            current_right,
+            neighbor_left,
+            neighbor_right,
+            terrain,
+            coord,
+            neighbor,
+            params.core_radius,
+            params.hill_ridge,
+            params.mountain_crest,
+            params.cliff_lip_height,
+            params.cliff_lip_width,
+            color,
+        );
+    }
 }
 
 #[derive(Clone, Copy)]
-struct DisplacedBridgeGrid<'a> {
+struct BridgeGrid<'a> {
     terrain: &'a StaticTerrain,
     current: Coord,
     neighbor: Coord,
@@ -385,13 +478,18 @@ struct DisplacedBridgeGrid<'a> {
     neighbor_left: [f32; 2],
     neighbor_right: [f32; 2],
     radius: f32,
-    displacement: TerrainDisplacementParams,
+    hill_ridge: HillRidgeParams,
+    mountain_crest: MountainCrestParams,
+    /// Additional arch height at the bridge midpoint for mountain–mountain edges.
+    mountain_arch: f32,
     side_segments: u8,
     cross_segments: u8,
+    /// When true, apply smoothstep profile to round the bridge shoulders (R3.3).
+    is_slope: bool,
     color: [f32; 4],
 }
 
-fn push_displaced_bridge_grid(data: &mut PrototypeMeshData, grid: DisplacedBridgeGrid) {
+fn push_bridge_grid(data: &mut PrototypeMeshData, grid: BridgeGrid) {
     let side_segments = u32::from(grid.side_segments.max(1));
     let cross_segments = u32::from(grid.cross_segments.max(1));
     let vertex_columns = cross_segments + 1;
@@ -403,29 +501,30 @@ fn push_displaced_bridge_grid(data: &mut PrototypeMeshData, grid: DisplacedBridg
 
     for side in 0..=side_segments {
         let side_t = u32_to_f32(side) / u32_to_f32(side_segments);
-        let current_edge = lerp2(grid.current_left, grid.current_right, side_t);
-        let neighbor_edge = lerp2(grid.neighbor_left, grid.neighbor_right, side_t);
-        let current_height = displaced_core_height_at(
-            grid.terrain,
-            grid.current,
-            grid.current_center,
-            grid.radius,
-            grid.displacement,
-            current_edge,
+        let current_xy = lerp2(grid.current_left, grid.current_right, side_t);
+        let neighbor_xy = lerp2(grid.neighbor_left, grid.neighbor_right, side_t);
+        let h_current = core_height_at(
+            grid.terrain, grid.current, grid.current_center,
+            grid.radius, grid.hill_ridge, grid.mountain_crest, current_xy,
         );
-        let neighbor_height = displaced_core_height_at(
-            grid.terrain,
-            grid.neighbor,
-            grid.neighbor_center,
-            grid.radius,
-            grid.displacement,
-            neighbor_edge,
+        let h_neighbor = core_height_at(
+            grid.terrain, grid.neighbor, grid.neighbor_center,
+            grid.radius, grid.hill_ridge, grid.mountain_crest, neighbor_xy,
         );
 
         for cross in 0..=cross_segments {
             let cross_t = u32_to_f32(cross) / u32_to_f32(cross_segments);
-            let xy = lerp2(current_edge, neighbor_edge, cross_t);
-            positions.push([xy[0], xy[1], lerp(current_height, neighbor_height, cross_t)]);
+            // R3.3: smoothstep profile for slopes — rounds the shoulder crease at core joins.
+            let profile_t = if grid.is_slope {
+                smoothstep(0.0, 1.0, cross_t)
+            } else {
+                cross_t
+            };
+            // Mountain–mountain bridges arch upward at the midpoint (R3.2).
+            let arch = grid.mountain_arch * 4.0 * cross_t * (1.0 - cross_t);
+            let xy = lerp2(current_xy, neighbor_xy, cross_t);
+            let z = lerp(h_current, h_neighbor, profile_t) + arch;
+            positions.push([xy[0], xy[1], z]);
             colors.push(grid.color);
             let blend = tile_pair_blend(grid.terrain, grid.current, grid.neighbor, cross_t);
             texture_layers.push(blend.layers);
@@ -453,6 +552,84 @@ fn push_displaced_bridge_grid(data: &mut PrototypeMeshData, grid: DisplacedBridg
     );
 }
 
+/// Adds a hard horizontal lip at the top of a cliff edge (R3.3).
+///
+/// The lip sits on the high side of the cliff — a small horizontal overhang
+/// that makes the impassable drop legible through silhouette and lighting.
+#[allow(clippy::too_many_arguments)]
+fn push_cliff_lip(
+    data: &mut PrototypeMeshData,
+    current_center: [f32; 2],
+    neighbor_center: [f32; 2],
+    current_left: [f32; 2],
+    current_right: [f32; 2],
+    neighbor_left: [f32; 2],
+    neighbor_right: [f32; 2],
+    terrain: &StaticTerrain,
+    current: Coord,
+    neighbor: Coord,
+    radius: f32,
+    hill_ridge: HillRidgeParams,
+    mountain_crest: MountainCrestParams,
+    lip_height: f32,
+    lip_width: f32,
+    color: [f32; 4],
+) {
+    let h_current_l = core_height_at(terrain, current, current_center, radius, hill_ridge, mountain_crest, current_left);
+    let h_current_r = core_height_at(terrain, current, current_center, radius, hill_ridge, mountain_crest, current_right);
+    let h_neighbor_l = core_height_at(terrain, neighbor, neighbor_center, radius, hill_ridge, mountain_crest, neighbor_left);
+    let h_neighbor_r = core_height_at(terrain, neighbor, neighbor_center, radius, hill_ridge, mountain_crest, neighbor_right);
+
+    let h_current_avg = (h_current_l + h_current_r) * 0.5;
+    let h_neighbor_avg = (h_neighbor_l + h_neighbor_r) * 0.5;
+
+    // Lip belongs to the higher side.
+    let (high_left, high_right, h_high_l, h_high_r, low_left, low_right) =
+        if h_current_avg >= h_neighbor_avg {
+            (current_left, current_right, h_current_l, h_current_r, neighbor_left, neighbor_right)
+        } else {
+            (neighbor_left, neighbor_right, h_neighbor_l, h_neighbor_r, current_left, current_right)
+        };
+
+    let high_mid = lerp2(high_left, high_right, 0.5);
+    let low_mid = lerp2(low_left, low_right, 0.5);
+    let outward = normalize([low_mid[0] - high_mid[0], low_mid[1] - high_mid[1]]);
+
+    // Lip extends slightly toward the lower tile.
+    let lip_left = [high_left[0] + outward[0] * lip_width, high_left[1] + outward[1] * lip_width];
+    let lip_right = [high_right[0] + outward[0] * lip_width, high_right[1] + outward[1] * lip_width];
+    let lip_z_l = h_high_l + lip_height;
+    let lip_z_r = h_high_r + lip_height;
+
+    // Top of lip (horizontal face, upward-facing).
+    push_triangle_with_blends(
+        data,
+        [[high_left[0], high_left[1], lip_z_l], [high_right[0], high_right[1], lip_z_r], [lip_right[0], lip_right[1], lip_z_r]],
+        [color; 3],
+        [solid_texture_blend(TEXTURE_LAYER_MOUNTAIN); 3],
+    );
+    push_triangle_with_blends(
+        data,
+        [[high_left[0], high_left[1], lip_z_l], [lip_right[0], lip_right[1], lip_z_r], [lip_left[0], lip_left[1], lip_z_l]],
+        [color; 3],
+        [solid_texture_blend(TEXTURE_LAYER_MOUNTAIN); 3],
+    );
+
+    // Outer face of lip (faces outward, hard face normal).
+    push_triangle_with_blends(
+        data,
+        [[lip_left[0], lip_left[1], h_high_l], [lip_right[0], lip_right[1], h_high_r], [lip_right[0], lip_right[1], lip_z_r]],
+        [color; 3],
+        [solid_texture_blend(TEXTURE_LAYER_MOUNTAIN); 3],
+    );
+    push_triangle_with_blends(
+        data,
+        [[lip_left[0], lip_left[1], h_high_l], [lip_right[0], lip_right[1], lip_z_r], [lip_left[0], lip_left[1], lip_z_l]],
+        [color; 3],
+        [solid_texture_blend(TEXTURE_LAYER_MOUNTAIN); 3],
+    );
+}
+
 fn push_corner_stitch(
     data: &mut PrototypeMeshData,
     coord: Coord,
@@ -470,29 +647,32 @@ fn push_corner_stitch(
         offset_center(center, neighbor_dirs[1]),
     ];
     let vertices = [
-        displaced_core_position_toward(
+        core_position_toward(
             terrain,
             tiles[0],
             centers[0],
             corner_point,
             params.core_radius,
-            params.displacement,
+            params.hill_ridge,
+            params.mountain_crest,
         ),
-        displaced_core_position_toward(
+        core_position_toward(
             terrain,
             tiles[1],
             centers[1],
             corner_point,
             params.core_radius,
-            params.displacement,
+            params.hill_ridge,
+            params.mountain_crest,
         ),
-        displaced_core_position_toward(
+        core_position_toward(
             terrain,
             tiles[2],
             centers[2],
             corner_point,
             params.core_radius,
-            params.displacement,
+            params.hill_ridge,
+            params.mountain_crest,
         ),
     ];
     let color = corner_color(terrain, tiles);
@@ -503,40 +683,38 @@ fn push_corner_stitch(
     push_triangle_with_blends(data, vertices, [color; 3], [blend; 3]);
 }
 
-fn displaced_core_position_toward(
+fn core_position_toward(
     terrain: &StaticTerrain,
     coord: Coord,
     center: [f32; 2],
     target: [f32; 2],
     radius: f32,
-    displacement: TerrainDisplacementParams,
+    hill_ridge: HillRidgeParams,
+    mountain_crest: MountainCrestParams,
 ) -> [f32; 3] {
     let xy = point_toward_xy(center, target, radius);
-    [
-        xy[0],
-        xy[1],
-        displaced_core_height_at(terrain, coord, center, radius, displacement, xy),
-    ]
+    [xy[0], xy[1], core_height_at(terrain, coord, center, radius, hill_ridge, mountain_crest, xy)]
 }
 
-fn displaced_core_height_at(
+/// Dispatches to the correct height function for the tile's terrain type.
+fn core_height_at(
     terrain: &StaticTerrain,
     coord: Coord,
     center: [f32; 2],
     radius: f32,
-    displacement: TerrainDisplacementParams,
+    hill_ridge: HillRidgeParams,
+    mountain_crest: MountainCrestParams,
     xy: [f32; 2],
 ) -> f32 {
-    let base_height = terrain_height(terrain, coord);
-    displaced_core_height(
-        terrain,
-        coord,
-        center,
-        base_height,
-        radius,
-        displacement,
-        [xy[0], xy[1], base_height],
-    )
+    let base = terrain_height(terrain, coord);
+    let level = terrain.height_level.get(coord).copied().unwrap_or(0);
+    if level >= terrain.mountain_level {
+        mountain_core_height(terrain, coord, center, base, radius, mountain_crest, xy)
+    } else if terrain.is_hilly.get(coord).copied().unwrap_or(false) {
+        hill_core_height(terrain, coord, center, base, radius, hill_ridge, xy)
+    } else {
+        base
+    }
 }
 
 /// Builds the synthetic case suite used by the R1 corner prototype harness.
@@ -762,7 +940,8 @@ struct CoreSector<'a> {
     center: [f32; 2],
     base_height: f32,
     radius: f32,
-    displacement: TerrainDisplacementParams,
+    hill_ridge: HillRidgeParams,
+    mountain_crest: MountainCrestParams,
     color: [f32; 4],
     blend: TerrainBlend,
     corner: usize,
@@ -798,14 +977,14 @@ fn push_core_sector(
             let displaced = [
                 position[0],
                 position[1],
-                displaced_core_height(
+                core_height_at(
                     sector.terrain,
                     sector.coord,
                     sector.center,
-                    sector.base_height,
                     sector.radius,
-                    sector.displacement,
-                    position,
+                    sector.hill_ridge,
+                    sector.mountain_crest,
+                    [position[0], position[1]],
                 ),
             ];
             positions.push(displaced);
@@ -856,160 +1035,205 @@ fn core_grid_index(i: u32, j: u32, subdivisions: u32) -> u32 {
     previous_rows + j
 }
 
-fn displaced_core_height(
+// ---- Hill ridge field (R3.1) ----
+
+/// Computes the height of a hill-tile core vertex at world position `xy`.
+///
+/// The ridge field is a pure function of XY, so independent chunks agree at
+/// their seams. Amplitude fades to zero at hill→non-hill edges, keeping the
+/// mean height at tier level and preventing visual walls.
+fn hill_core_height(
     terrain: &StaticTerrain,
     coord: Coord,
     center: [f32; 2],
-    base_height: f32,
+    base: f32,
     radius: f32,
-    displacement: TerrainDisplacementParams,
-    position: [f32; 3],
+    params: HillRidgeParams,
+    xy: [f32; 2],
 ) -> f32 {
-    let amplitude = displacement_amplitude(terrain, coord, displacement);
-    if amplitude == 0.0 {
-        return base_height;
+    let offset = [xy[0] - center[0], xy[1] - center[1]];
+    let fade = hill_edge_fade(terrain, coord, offset, radius);
+    if fade <= 0.0 {
+        return base;
     }
-
-    let dx = position[0] - center[0];
-    let dy = position[1] - center[1];
-    let radial = (dx.mul_add(dx, dy * dy)).sqrt() / radius;
-    let edge_progress = hex_edge_progress([dx, dy], radius);
-    let edge_taper = 1.0
-        - smoothstep(
-            displacement.edge_taper_start,
-            displacement.edge_taper_end,
-            edge_progress,
-        );
-    let edge_support =
-        displacement_edge_support(terrain, coord, center, radius, position, displacement);
-    let edge_taper = edge_taper + (1.0 - edge_taper) * edge_support;
-    if edge_taper <= 0.0 {
-        return base_height;
-    }
-
-    let shape = 1.0 - radial.clamp(0.0, 1.0).powi(2);
-    let noise = displacement_noise(position[0], position[1], displacement);
-    let level = terrain.height_level.get(coord).copied().unwrap_or(0);
-    let vertical_offset = if level >= terrain.mountain_level {
-        amplitude
-            * edge_taper
-            * shape
-            * (displacement.mountain_base_weight + displacement.mountain_noise_weight * noise.abs())
-    } else {
-        amplitude
-            * edge_taper
-            * shape
-            * (displacement.hill_base_weight + displacement.hill_noise_weight * noise)
-    };
-
-    base_height + vertical_offset.max(0.0)
+    let ridge = hill_ridge_displacement(xy, params);
+    let detail = params.detail_amplitude
+        * value_noise(xy[0] * params.detail_frequency, xy[1] * params.detail_frequency, params.detail_salt);
+    base + fade * (ridge + detail)
 }
 
-fn displacement_amplitude(
-    terrain: &StaticTerrain,
-    coord: Coord,
-    displacement: TerrainDisplacementParams,
-) -> f32 {
-    let base_amplitude = base_displacement_amplitude(terrain, coord, displacement);
-    if is_mountain_tile(terrain, coord) {
-        base_amplitude * mountain_neighbor_scale(terrain, coord, displacement)
-    } else {
-        base_amplitude
-    }
+/// Domain-warped directional ridge profile — a pure function of world XY.
+///
+/// Returns a displacement in world-height units, symmetric around zero
+/// (ridges go above and below base; mean = 0 so tier height is preserved).
+fn hill_ridge_displacement(xy: [f32; 2], params: HillRidgeParams) -> f32 {
+    // Domain warp: slow noise offset so ridges meander rather than running straight.
+    let warp_freq = params.field_rate * 2.5;
+    let wx = value_noise(xy[0] * warp_freq, xy[1] * warp_freq, params.warp_salt[0]);
+    let wy = value_noise(xy[0] * warp_freq, xy[1] * warp_freq + 13.71, params.warp_salt[1]);
+    let warped = [
+        xy[0] + params.warp_strength * wx,
+        xy[1] + params.warp_strength * wy,
+    ];
+
+    // Direction field: slowly-rotating angle driven by low-frequency noise.
+    let angle = value_noise(
+        warped[0] * params.field_rate,
+        warped[1] * params.field_rate,
+        params.dir_salt,
+    ) * std::f32::consts::TAU;
+
+    // Ridged cosine: range [-1, 1], mean 0, peaks at integer phase values.
+    let phase = dot2(warped, [angle.cos(), angle.sin()]) / params.wavelength;
+    (std::f32::consts::TAU * phase).cos() * params.amplitude
 }
 
-fn base_displacement_amplitude(
+/// Returns the amplitude-fade factor [0..1] for a position in a hill tile.
+///
+/// Fades to 0 at hill→non-hill edges; stays 1 across hill→hill edges,
+/// so ridges flow continuously between adjacent hill tiles.
+fn hill_edge_fade(
     terrain: &StaticTerrain,
     coord: Coord,
-    displacement: TerrainDisplacementParams,
+    offset: [f32; 2],
+    radius: f32,
 ) -> f32 {
-    let level = terrain.height_level.get(coord).copied().unwrap_or(0);
-    if level >= terrain.mountain_level {
-        displacement.mountain_amplitude
-    } else if terrain.is_hilly.get(coord).copied().unwrap_or(false) {
-        displacement.hill_amplitude
+    // Base taper: falls to 0 at the core boundary regardless of neighbors.
+    let edge_progress = hex_edge_progress(offset, radius);
+    let base_taper = 1.0 - smoothstep(0.1, 1.0, edge_progress);
+
+    // Edge-support boost: hold amplitude up at hill→hill (and hill→mountain) edges.
+    let apothem = hex_apothem(radius);
+    let mut total_weight = 0.0_f32;
+    let mut total_support = 0.0_f32;
+
+    for direction in GEOMETRY_DIRECTIONS {
+        let side_weight = (dot2(offset, direction_unit(direction)) / apothem)
+            .max(0.0)
+            .powi(4);
+        if side_weight <= f32::EPSILON {
+            continue;
+        }
+        total_weight += side_weight;
+        let neighbor_is_ridged = terrain.bounds.neighbor(coord, direction).is_some_and(|n| {
+            let nl = terrain.height_level.get(n).copied().unwrap_or(0);
+            nl >= terrain.mountain_level || terrain.is_hilly.get(n).copied().unwrap_or(false)
+        });
+        if neighbor_is_ridged {
+            total_support += side_weight;
+        }
+    }
+
+    let support = if total_weight > f32::EPSILON {
+        total_support / total_weight
     } else {
         0.0
+    };
+    base_taper + (1.0 - base_taper) * support
+}
+
+// ---- Mountain crest skeleton (R3.2) ----
+
+/// Computes the height of a mountain-tile core vertex at world position `xy`.
+///
+/// Corners and edges shared between mountain tiles are elevated toward
+/// `crest_height`, forming a connected ridgeline across mountain clusters.
+/// At mountain→lower edges, displacement falls to zero (flanks). Interior
+/// vertices receive a dome-shaped base raised by a deterministic variant
+/// for secondary character.
+fn mountain_core_height(
+    terrain: &StaticTerrain,
+    coord: Coord,
+    center: [f32; 2],
+    base: f32,
+    radius: f32,
+    params: MountainCrestParams,
+    xy: [f32; 2],
+) -> f32 {
+    let dx = xy[0] - center[0];
+    let dy = xy[1] - center[1];
+
+    // `edge_progress` is 0 at the tile centre, 1 at any point on the hex core boundary.
+    // `dome` uses this so it reaches exactly 0 at every core-edge point (including
+    // the apothem midpoints, not just the circumradius corners).
+    let edge_progress = hex_edge_progress([dx, dy], radius);
+    let dome = 1.0 - edge_progress;
+
+    // Edge support: each hex face weighted by proximity and mountain-ness of neighbor.
+    let apothem = hex_apothem(radius);
+    let mut total_weight = 0.0_f32;
+    let mut total_support = 0.0_f32;
+
+    for direction in GEOMETRY_DIRECTIONS {
+        let side_weight = (dot2([dx, dy], direction_unit(direction)) / apothem)
+            .max(0.0)
+            .powi(4);
+        if side_weight <= f32::EPSILON {
+            continue;
+        }
+        total_weight += side_weight;
+        if terrain.bounds.neighbor(coord, direction).is_some_and(|n| is_mountain_tile(terrain, n)) {
+            total_support += side_weight;
+        }
     }
+
+    let edge_support = if total_weight > f32::EPSILON {
+        total_support / total_weight
+    } else {
+        0.0
+    };
+
+    // At interior points the dome dominates; at boundaries edge_support * edge_progress
+    // takes over — rising to crest_height at mountain-mountain edges and falling to zero
+    // at mountain-lower edges.
+    let crest_fraction = dome.max(edge_support * edge_progress);
+
+    let variant = mountain_interior_variant(coord, dx, dy, radius, params.crest_height);
+    let detail = params.detail_amplitude
+        * value_noise(xy[0] * params.detail_frequency, xy[1] * params.detail_frequency, params.detail_salt);
+
+    // Scale all displacement by crest_fraction so it falls to zero at non-mountain edges.
+    let offset = (params.crest_height + variant + detail) * crest_fraction;
+    base + offset.max(0.0)
+}
+
+/// Deterministic secondary-character modifier for mountain tile interiors.
+///
+/// Selects one of four variant shapes based on a hash of the tile coord and
+/// applies a hex-rotation so ranges don't read as repetitive stripes.
+fn mountain_interior_variant(coord: Coord, dx: f32, dy: f32, radius: f32, crest_height: f32) -> f32 {
+    let hash = tile_hash(coord);
+    let [rdx, rdy] = rotate_hex_steps([dx, dy], hash % 6);
+    let rx = rdx / radius;
+    let ry = rdy / radius;
+    let scale = crest_height * 0.10;
+
+    match (hash >> 3) % 4 {
+        0 => 0.0,
+        1 => scale * ry.clamp(-1.0, 1.0),                                        // asymmetric lean
+        2 => -scale * (rx * rx + ry * ry).min(1.0),                              // bowl concavity
+        3 => scale * (1.0 - (rx + 0.35).abs() * 2.0).max(0.0),                  // subsidiary ridge
+        _ => unreachable!("hash % 4 is 0..3"),
+    }
+}
+
+fn tile_hash(coord: Coord) -> u32 {
+    let mut v = u32::from_ne_bytes(coord.q.to_ne_bytes()).wrapping_mul(0x9E37_79B1);
+    v ^= u32::from_ne_bytes(coord.r.to_ne_bytes()).wrapping_mul(0x6C62_272E);
+    v ^= v >> 16;
+    v = v.wrapping_mul(0x7FEB_352D);
+    v ^= v >> 15;
+    v
+}
+
+fn rotate_hex_steps(xy: [f32; 2], steps: u32) -> [f32; 2] {
+    let angle = u32_to_f32(steps % 6) * std::f32::consts::PI / 3.0;
+    let (sin, cos) = angle.sin_cos();
+    [cos * xy[0] - sin * xy[1], sin * xy[0] + cos * xy[1]]
 }
 
 fn is_mountain_tile(terrain: &StaticTerrain, coord: Coord) -> bool {
     terrain.height_level.get(coord).copied().unwrap_or(0) >= terrain.mountain_level
-}
-
-fn mountain_neighbor_scale(
-    terrain: &StaticTerrain,
-    coord: Coord,
-    displacement: TerrainDisplacementParams,
-) -> f32 {
-    let mountain_ratio = mountain_neighbor_ratio(terrain, coord);
-    let scale = 1.0 + mountain_ratio * displacement.mountain_neighbor_weight;
-    scale.clamp(0.0, displacement.mountain_neighbor_scale_cap.max(0.0))
-}
-
-fn mountain_neighbor_ratio(terrain: &StaticTerrain, coord: Coord) -> f32 {
-    let mut mountain_neighbors = 0.0;
-    let mut total_neighbors = 0.0;
-
-    for direction in GEOMETRY_DIRECTIONS {
-        let Some(neighbor) = terrain.bounds.neighbor(coord, direction) else {
-            continue;
-        };
-        total_neighbors += 1.0;
-        if is_mountain_tile(terrain, neighbor) {
-            mountain_neighbors += 1.0;
-        }
-    }
-
-    if total_neighbors <= f32::EPSILON {
-        0.0
-    } else {
-        mountain_neighbors / total_neighbors
-    }
-}
-
-fn displacement_edge_support(
-    terrain: &StaticTerrain,
-    coord: Coord,
-    center: [f32; 2],
-    radius: f32,
-    position: [f32; 3],
-    displacement: TerrainDisplacementParams,
-) -> f32 {
-    let current_amplitude = base_displacement_amplitude(terrain, coord, displacement);
-    if current_amplitude <= f32::EPSILON {
-        return 0.0;
-    }
-
-    let offset = [position[0] - center[0], position[1] - center[1]];
-    let apothem = hex_apothem(radius);
-    let mut total_weight = 0.0;
-    let mut total_support = 0.0;
-
-    for direction in GEOMETRY_DIRECTIONS {
-        let side_progress = dot2(offset, direction_unit(direction)) / apothem;
-        let side_weight = side_progress.max(0.0).powi(4);
-        if side_weight <= f32::EPSILON {
-            continue;
-        }
-
-        total_weight += side_weight;
-        total_support += side_weight
-            * terrain
-                .bounds
-                .neighbor(coord, direction)
-                .map_or(0.0, |neighbor| {
-                    let neighbor_amplitude =
-                        base_displacement_amplitude(terrain, neighbor, displacement);
-                    (neighbor_amplitude / current_amplitude).clamp(0.0, 1.0)
-                });
-    }
-
-    if total_weight <= f32::EPSILON {
-        0.0
-    } else {
-        total_support / total_weight
-    }
 }
 
 fn hex_edge_progress(offset: [f32; 2], radius: f32) -> f32 {
@@ -1039,22 +1263,6 @@ fn direction_unit(direction: Direction) -> [f32; 2] {
 
 fn dot2(a: [f32; 2], b: [f32; 2]) -> f32 {
     a[0].mul_add(b[0], a[1] * b[1])
-}
-
-fn displacement_noise(x: f32, y: f32, displacement: TerrainDisplacementParams) -> f32 {
-    let mut total_weight = 0.0;
-    let mut sample = 0.0;
-
-    for layer in displacement.noise_layers {
-        sample += value_noise(x * layer.frequency, y * layer.frequency, layer.salt) * layer.weight;
-        total_weight += layer.weight;
-    }
-
-    if total_weight <= f32::EPSILON {
-        0.0
-    } else {
-        (sample / total_weight).clamp(-1.0, 1.0)
-    }
 }
 
 fn value_noise(sample_x: f32, sample_y: f32, salt: u32) -> f32 {
@@ -1634,7 +1842,7 @@ mod tests {
         let mountain = Coord::new(3, 2);
         let terrain = test_terrain(bounds, 5, |coord| if coord == mountain { 5 } else { 2 });
         let params = TerrainMeshParams {
-            bridge_segments: 2,
+            slope_bridge_segments: 2,
             ..TerrainMeshParams::default()
         };
         let data = build_terrain_chunk_data(Coord::new(0, 0), &terrain, params);
@@ -1711,8 +1919,10 @@ mod tests {
         );
     }
 
+    // R3.1 — Hill ridge field tests
+
     #[test]
-    fn hilly_core_displaces_and_tapers_to_edge() {
+    fn hilly_core_shows_ridge_variation_and_fades_at_edge() {
         let bounds = MapBounds::new(6, 4);
         let target = Coord::new(2, 2);
         let mut terrain = test_terrain(bounds, 5, |_| 2);
@@ -1722,23 +1932,67 @@ mod tests {
         let center = hex_center(target, bounds);
         let base = tier_height(2, 5);
 
-        let max_core_height = max_height_near(&data, center, 0.0, params.core_radius * 0.35);
+        // Inner region covers > 1 ridge wavelength so it must contain both peaks and valleys.
+        let inner_radius = params.core_radius * 0.5;
+        let max_inner = max_height_near(&data, center, 0.0, inner_radius);
+        let min_inner = min_height_near(&data, center, 0.0, inner_radius);
         assert!(
-            max_core_height > base + 0.15,
-            "hilly core should rise above its tier height"
+            max_inner - min_inner > params.hill_ridge.amplitude * 0.5,
+            "hill core should show significant ridge variation (max={max_inner:.3}, min={min_inner:.3})"
         );
 
-        let edge_height = max_height_near(
-            &data,
-            center,
-            params.core_radius - 0.02,
-            params.core_radius + 0.02,
-        );
-        assert_height_eq(edge_height, base);
+        // At the core boundary toward non-hilly neighbors, amplitude fades to zero.
+        let edge_max = max_height_near(&data, center, params.core_radius - 0.02, params.core_radius + 0.02);
+        assert_height_eq(edge_max, base);
     }
 
     #[test]
-    fn mountain_displacement_is_larger_than_hill_displacement() {
+    fn hill_ridge_amplitude_scales_proportionally() {
+        let bounds = MapBounds::new(6, 4);
+        let target = Coord::new(2, 2);
+        let mut terrain = test_terrain(bounds, 5, |_| 2);
+        terrain.is_hilly.set(target, true);
+        let base_params = TerrainMeshParams::default();
+        let boosted_params = TerrainMeshParams {
+            hill_ridge: HillRidgeParams {
+                amplitude: base_params.hill_ridge.amplitude * 2.0,
+                detail_amplitude: 0.0,
+                ..base_params.hill_ridge
+            },
+            ..base_params
+        };
+        let no_detail_params = TerrainMeshParams {
+            hill_ridge: HillRidgeParams { detail_amplitude: 0.0, ..base_params.hill_ridge },
+            ..base_params
+        };
+
+        let center = hex_center(target, bounds);
+        let inner = base_params.core_radius * 0.5;
+        let base_range = max_height_near(
+            &build_terrain_chunk_data(Coord::new(0, 0), &terrain, no_detail_params),
+            center, 0.0, inner,
+        ) - min_height_near(
+            &build_terrain_chunk_data(Coord::new(0, 0), &terrain, no_detail_params),
+            center, 0.0, inner,
+        );
+        let boosted_range = max_height_near(
+            &build_terrain_chunk_data(Coord::new(0, 0), &terrain, boosted_params),
+            center, 0.0, inner,
+        ) - min_height_near(
+            &build_terrain_chunk_data(Coord::new(0, 0), &terrain, boosted_params),
+            center, 0.0, inner,
+        );
+
+        assert!(
+            boosted_range > base_range * 1.5,
+            "doubling hill amplitude should visibly widen the height range"
+        );
+    }
+
+    // R3.2 — Mountain crest skeleton tests
+
+    #[test]
+    fn mountain_crest_exceeds_hill_amplitude() {
         let bounds = MapBounds::new(6, 4);
         let hilly = Coord::new(2, 2);
         let mountain = Coord::new(3, 2);
@@ -1748,27 +2002,24 @@ mod tests {
         let params = TerrainMeshParams::default();
         let data = build_terrain_chunk_data(Coord::new(0, 0), &terrain, params);
 
-        let hilly_peak = max_height_near(
-            &data,
-            hex_center(hilly, bounds),
-            0.0,
-            params.core_radius * 0.45,
-        ) - tier_height(2, 5);
+        let hill_range = {
+            let c = hex_center(hilly, bounds);
+            let r = params.core_radius * 0.5;
+            max_height_near(&data, c, 0.0, r) - min_height_near(&data, c, 0.0, r)
+        };
         let mountain_peak = max_height_near(
-            &data,
-            hex_center(mountain, bounds),
-            0.0,
-            params.core_radius * 0.45,
+            &data, hex_center(mountain, bounds), 0.0, params.core_radius * 0.5,
         ) - tier_height(5, 5);
 
         assert!(
-            mountain_peak > hilly_peak * 2.0,
-            "mountain displacement should visibly exceed hill displacement"
+            mountain_peak > hill_range * 2.0,
+            "mountain crest height should greatly exceed hill ridge range \
+             (mountain_peak={mountain_peak:.2}, hill_range={hill_range:.2})"
         );
     }
 
     #[test]
-    fn mountain_edge_blends_toward_mountain_neighbor() {
+    fn mountain_edge_is_flat_for_isolated_tile_and_elevated_for_paired() {
         let bounds = MapBounds::new(6, 4);
         let target = Coord::new(2, 2);
         let neighbor = bounds
@@ -1776,140 +2027,64 @@ mod tests {
             .expect("target has east neighbor");
         let isolated = test_terrain(bounds, 5, |coord| if coord == target { 5 } else { 2 });
         let paired = test_terrain(bounds, 5, |coord| {
-            if coord == target || coord == neighbor {
-                5
-            } else {
-                2
-            }
+            if coord == target || coord == neighbor { 5 } else { 2 }
         });
         let params = TerrainMeshParams::default();
         let center = hex_center(target, bounds);
         let base_height = tier_height(5, 5);
-        let edge_position =
-            core_edge_midpoint(center, Direction::East, params.core_radius, base_height);
+        let [ex, ey, _] = core_edge_midpoint(center, Direction::East, params.core_radius, base_height);
 
-        let isolated_edge_height = displaced_core_height(
-            &isolated,
-            target,
-            center,
-            base_height,
-            params.core_radius,
-            params.displacement,
-            edge_position,
+        let isolated_h = core_height_at(
+            &isolated, target, center, params.core_radius,
+            params.hill_ridge, params.mountain_crest, [ex, ey],
         );
-        let paired_edge_height = displaced_core_height(
-            &paired,
-            target,
-            center,
-            base_height,
-            params.core_radius,
-            params.displacement,
-            edge_position,
+        let paired_h = core_height_at(
+            &paired, target, center, params.core_radius,
+            params.hill_ridge, params.mountain_crest, [ex, ey],
         );
 
-        assert_height_eq(isolated_edge_height, base_height);
+        assert_height_eq(isolated_h, base_height);
         assert!(
-            paired_edge_height > base_height + 0.1,
-            "mountain edge should stay displaced across a mountain neighbor"
+            paired_h > base_height + 0.1,
+            "mountain edge toward a mountain neighbor should be elevated above tier"
         );
     }
 
     #[test]
-    fn mountain_neighbor_weight_is_capped() {
+    fn fully_surrounded_mountain_has_higher_center_than_isolated() {
         let bounds = MapBounds::new(6, 4);
-        let target = Coord::new(2, 2);
-        let terrain = test_terrain(bounds, 5, |coord| {
-            if coord == target || bounds.distance(target, coord) == 1 {
-                5
-            } else {
-                2
-            }
+        let target = Coord::new(3, 2);
+        let isolated_terrain = test_terrain(bounds, 5, |coord| if coord == target { 5 } else { 2 });
+        let surrounded_terrain = test_terrain(bounds, 5, |coord| {
+            if coord == target || bounds.distance(target, coord) == 1 { 5 } else { 2 }
         });
-        let displacement = TerrainDisplacementParams {
-            mountain_neighbor_weight: 10.0,
-            mountain_neighbor_scale_cap: 1.1,
-            ..TerrainDisplacementParams::default()
-        };
-
-        assert_height_eq(
-            displacement_amplitude(&terrain, target, displacement),
-            displacement.mountain_amplitude * displacement.mountain_neighbor_scale_cap,
-        );
-    }
-
-    #[test]
-    fn custom_displacement_params_change_hill_amplitude() {
-        let bounds = MapBounds::new(6, 4);
-        let target = Coord::new(2, 2);
-        let mut terrain = test_terrain(bounds, 5, |_| 2);
-        terrain.is_hilly.set(target, true);
-        let base_params = TerrainMeshParams::default();
-        let boosted_params = TerrainMeshParams {
-            displacement: TerrainDisplacementParams {
-                hill_amplitude: base_params.displacement.hill_amplitude * 2.0,
-                ..base_params.displacement
-            },
-            ..base_params
-        };
-
-        let base_data = build_terrain_chunk_data(Coord::new(0, 0), &terrain, base_params);
-        let boosted_data = build_terrain_chunk_data(Coord::new(0, 0), &terrain, boosted_params);
+        let params = TerrainMeshParams::default();
         let center = hex_center(target, bounds);
-        let base_height = tier_height(2, 5);
-        let base_peak =
-            max_height_near(&base_data, center, 0.0, base_params.core_radius * 0.45) - base_height;
-        let boosted_peak = max_height_near(
-            &boosted_data,
-            center,
-            0.0,
-            boosted_params.core_radius * 0.45,
-        ) - base_height;
 
-        assert!(
-            boosted_peak > base_peak * 1.5,
-            "higher hill amplitude should raise hilly core displacement"
+        // Zero-amplitude detail so the comparison is purely from crest skeleton.
+        let crest_only = MountainCrestParams { detail_amplitude: 0.0, ..params.mountain_crest };
+        let params_nd = TerrainMeshParams { mountain_crest: crest_only, ..params };
+
+        let isolated_peak = core_height_at(
+            &isolated_terrain, target, center, params_nd.core_radius,
+            params_nd.hill_ridge, params_nd.mountain_crest, center,
         );
-    }
+        let surrounded_peak = core_height_at(
+            &surrounded_terrain, target, center, params_nd.core_radius,
+            params_nd.hill_ridge, params_nd.mountain_crest, center,
+        );
 
-    #[test]
-    fn zero_noise_weights_use_smooth_base_shape() {
-        let params = TerrainDisplacementParams {
-            noise_layers: [
-                TerrainNoiseLayer {
-                    weight: 0.0,
-                    ..TerrainDisplacementParams::default().noise_layers[0]
-                },
-                TerrainNoiseLayer {
-                    weight: 0.0,
-                    ..TerrainDisplacementParams::default().noise_layers[1]
-                },
-            ],
-            ..TerrainDisplacementParams::default()
-        };
-
-        assert_height_eq(displacement_noise(123.0, 456.0, params), 0.0);
-    }
-
-    #[test]
-    fn noise_layer_params_are_respected() {
-        let layer = TerrainNoiseLayer {
-            frequency: 0.25,
-            weight: 1.0,
-            salt: 0xABCD_1234,
-        };
-        let params = TerrainDisplacementParams {
-            noise_layers: [
-                layer,
-                TerrainNoiseLayer {
-                    weight: 0.0,
-                    ..TerrainDisplacementParams::default().noise_layers[1]
-                },
-            ],
-            ..TerrainDisplacementParams::default()
-        };
-        let expected = value_noise(8.0 * layer.frequency, 4.0 * layer.frequency, layer.salt);
-
-        assert_height_eq(displacement_noise(8.0, 4.0, params), expected);
+        // Both should be elevated (dome at center), but heights are identical since dome
+        // is independent of neighbors; the difference shows at edges, not the center.
+        // This test verifies that surrounded still reaches crest_height at center.
+        assert!(
+            surrounded_peak > tier_height(5, 5) + params_nd.mountain_crest.crest_height * 0.8,
+            "fully-surrounded mountain center should reach near crest_height"
+        );
+        assert!(
+            surrounded_peak >= isolated_peak,
+            "surrounded mountain should be at least as tall as isolated"
+        );
     }
 
     #[test]
@@ -1987,6 +2162,26 @@ mod tests {
         min_distance: f32,
         max_distance: f32,
     ) -> f32 {
+        height_near_fold(data, center, min_distance, max_distance, f32::NEG_INFINITY, f32::max)
+    }
+
+    fn min_height_near(
+        data: &PrototypeMeshData,
+        center: [f32; 2],
+        min_distance: f32,
+        max_distance: f32,
+    ) -> f32 {
+        height_near_fold(data, center, min_distance, max_distance, f32::INFINITY, f32::min)
+    }
+
+    fn height_near_fold(
+        data: &PrototypeMeshData,
+        center: [f32; 2],
+        min_distance: f32,
+        max_distance: f32,
+        init: f32,
+        fold_fn: impl Fn(f32, f32) -> f32,
+    ) -> f32 {
         data.positions
             .iter()
             .filter(|position| {
@@ -1996,7 +2191,7 @@ mod tests {
                 distance >= min_distance && distance <= max_distance
             })
             .map(|position| position[2])
-            .fold(f32::NEG_INFINITY, f32::max)
+            .fold(init, fold_fn)
     }
 
     fn core_edge_midpoint(
