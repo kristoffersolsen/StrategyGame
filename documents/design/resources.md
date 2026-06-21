@@ -154,11 +154,19 @@ the sole hard gate (Section 3), so no unlucky start is bricked by lacking tin.
   re-gating, add a small copper+tin **network synergy** (holding both grants a
   bronze-efficiency bonus) as a later refinement. Do not build it now.
 
-**Open questions:**
-- Naming collision: there is a luxury deposit named *Gold* (precious metal, from
-  `Precious` mineral character) and a currency also called *gold* (Section 6).
-  Resolve by renaming one (e.g. luxury "gold ore", or currency "coin"/"wealth")
-  before the registry locks string keys.
+**Resolved — naming collision.** There was a luxury deposit named *Gold*
+(precious metal, from the `Precious` mineral character) and a currency also called
+*gold* (Section 6). **Resolved by renaming the deposit to "gold ore"** (string key
+`gold_ore`), keeping the currency as **"gold."** The currency keeps the
+genre-standard term and is referenced across the whole economy layer, so renaming
+*it* would ripple everywhere; the deposit is a single content entry, so it is the
+localized fix, and "gold ore → yields gold" reads naturally as mine-extraction
+language alongside copper and iron. This changes the worldgen resource string key
+from `gold` to `gold_ore`, which (per the alphabetical handle assignment, ADR-0022)
+shifts resource handles and rebases the worldgen reference hash — a one-time
+content rebase to do before string keys lock, not an algorithm change. Minor
+residual: "ore" implies a smeltable intermediate while the deposit yields currency
+directly; accepted, and "gold deposit" is a drop-in if it ever grates.
 
 ---
 
@@ -198,10 +206,14 @@ pressure the design depends on.
   far from a luxury source benefit with no logistics cost until trade exists.
 
 **Mitigations:**
-- Accepted as interim. The Ancient era has no road or trade-route system to be
-  "on" (those are Classical-plus), so empire-wide is the simplest rule that works;
-  it tightens to network-gated when trade is designed, which raises difficulty in
-  the same direction the population curve already pushes.
+- Accepted as interim, and deliberately decoupled from the goods network. The
+  Ancient era *does* now have roads and a supply network (ADR-0030), but that
+  network scopes **bulk goods** (materials, food, §9), not amenities: amenity
+  reach stays **empire-wide** for now and tightens to network-gated when the
+  trade system proper is designed. Amenity reach and goods reach are independent
+  axes; keeping amenities empire-wide while goods are network-local is the
+  simplest rule that works, and it tightens in the same direction the population
+  curve already pushes difficulty.
 
 **Open questions:**
 - Per-luxury amenity amount, demand-per-population curve, and the growth
@@ -225,11 +237,14 @@ it is fungible and pools at the polity level, unlike materials, which are bulky
 and (provisionally) local. Deferring the sink avoids inventing a treasury balance
 the Ancient era does not need.
 
-**Scope asymmetry (recorded, not accidental).** Gold is empire-wide; building
-materials and food are per-city (or per-region — still open, `cities.md` §2.7).
-Two scope models coexist in one economy by design: currency pools, bulk goods do
-not. This is cross-referenced in `cities.md` §2.7 so no one implementing later
-infers that materials follow gold to empire scope.
+**Scope asymmetry (resolved, ADR-0030).** Gold, science, and culture are
+**empire-wide**; building materials and food are **network-local** — stored per
+settlement and spent across the road-connected network (Section 9). Two scope
+models coexist in one economy by design: currency and abstract yields pool at the
+polity level; bulk goods sit in physical storage and travel only over
+infrastructure. This supersedes the earlier provisional "materials are city-local
+or per-region (still open)" note. Cross-referenced in `cities.md` §2.7 so no one
+implementing later infers that materials follow gold to empire scope.
 
 **Open questions:**
 - The entire sink side (recorded as a known-issues stub). An accumulator with no
@@ -257,9 +272,11 @@ as the next system after this document: without it, deposits cannot become yield
 and none of Sections 1–6 produce anything.
 
 **Open questions:**
-- Trade-network connectivity (which determines amenity reach, Section 5, and
-  future inter-city resource sharing) is undesigned and Classical-plus. Until it
-  exists, amenity distribution is empire-wide and materials are local.
+- Trade-network connectivity is now concrete in the Ancient era: roads form the
+  network and bulk goods are stored per settlement and spent network-wide
+  (Section 9, ADR-0030). What remains open is **amenity** reach — still empire-wide
+  (Section 5) until the higher-level trade/region abstraction is designed,
+  independently of the goods network.
 
 ---
 
@@ -279,10 +296,11 @@ and none of Sections 1–6 produce anything.
 - **Bonus — Stone, Wheat, Fish** *(already placed)*: the floor. Stone feeds base
   materials; wheat and fish feed food. Lumber feeds base materials as a forest
   feature, not a deposit.
-- **Luxury — Gold deposit, Gems, Spices, Wine, Tin** *(tin is new content)*:
+- **Luxury — Gold ore, Gems, Spices, Wine, Tin** *(gold ore renamed from "gold"
+  to resolve the currency collision, Section 4; tin is new content)*:
   placed and economically active in the Ancient era. Each provides one amenity
   (empire-wide, Section 5) and one secondary yield (Section 4): tin → materials;
-  gold deposit → currency; the others' yields tuned later (food or currency).
+  gold ore → currency; the others' yields tuned later (food or currency).
 
 **Progression invariant:** No Ancient-era progression step — no era transition,
 no tech on the critical path — requires a strategic resource. Strategics gate
@@ -292,6 +310,95 @@ designed.
 **Content additions required:** `Copper` (Strategic) and `Tin` (Luxury) as
 `ResourceId` variants and `resources.ron` entries; placement rules follow the
 existing category structure (ADR-0017), so no algorithm change.
+
+---
+
+## 9. Network supply: storage, distribution, and upkeep
+
+**Decision (ADR-0030):** Building materials and food are **stored per settlement**
+and **spent across the road-connected network**. Stock and reach are separated:
+
+- **Stock** is the accumulated pile. It lives in **settlement-local storage** —
+  the center has a base capacity; a **silo** building (constructible in any
+  district) adds more. Stock is severance-safe by construction: each settlement
+  physically holds its own.
+- **Reach** is what a build or a consumer can draw on. At spend time the network
+  **sums the stock of all road-connected settlements** and draws from it. Nothing
+  is transferred in the background; goods move only when consumed, and only over
+  live roads.
+
+**Demand-first, then surplus to storage.** Each turn, production satisfies, in
+order: (1) **live network demand** — population growth-flow (`cities.md` §2.6) and
+unit food upkeep — consumed **immediately and never stored**; then (2) **surplus**,
+which flows to storage **nearest-first** (deterministic tiebreak, pillar 0.4) into
+whatever connected silos have capacity. **Storage is downstream of consumption,
+never upstream of it:** a settlement's own production is not privileged for its own
+silos — the network's demand is served first, system-wide, and only the leftover
+is banked. Overflow past all reachable capacity is **lost** (leanest rule; revisit
+when a use for buffering appears).
+
+**Food has two roles.** The **growth-driving** part is a flow consumed immediately
+by population and is never stored; only the **surplus** earmarked for upkeep and
+transfer accumulates. Otherwise storage capacity would accidentally become a
+population cap (a full-silo city would stop growing).
+
+**Unit upkeep is food (Ancient era).** Units draw a continuous **food upkeep**
+from the network they stand in, consumed demand-first like any other live demand.
+This ties army size to the agricultural base — a real strategic limiter and the
+historical reality — and touches no gold (the gold sink is still deferred, Section
+6). The **barracks** building reduces unit upkeep (the military mirror of the
+furnace's consumption reduction; see `ancient-content.md`). Field-supply states
+(in-supply / foraging / out-of-supply) are owned by `combat.md` §3.11; this section
+owns only the economic draw.
+
+**Severance.** Cutting a road (terrain or, in war, an enemy) **splits the network**.
+Each side keeps whatever its silos physically hold and **re-runs demand-first on
+its now-smaller network**. A settlement cut off from a surplus partner loses that
+*future* surplus immediately and burns its stored buffer until it reconnects or
+shrinks. In-progress construction on a stranded side **pauses** (it does not fail
+or refund) — the kinder, more legible rule. This is the raiding/chokepoint pressure
+`combat.md` wants, arriving early.
+
+**Rationale:** Separating stock from reach dissolves the "who gets the pool on a
+split?" problem — there was never a pool, only per-settlement piles the network
+views in aggregate, so severance is a recalculation, not a tug-of-war. Demand-first
+is what prevents a downstream consumer (a city fed by a farm outpost) from being
+starved when the outpost builds a silo: the city's demand is drawn before anything
+is stored, so a silo can only ever capture true surplus. Settlement-local storage
+is also what gives the silo a real purpose (buffering against future severance) and
+makes capacity a genuine decision rather than invisible bookkeeping.
+
+**Risks:**
+- A network in deficit never stores anything (it consumes everything produced), so
+  silos sit empty. Correct, but it can read to the player as "storage is broken."
+- Empire-wide currency beside network-local goods is two scope models to hold in
+  mind at once.
+
+**Mitigations:**
+- Empty silos are a **legible deficit signal** (pillar 0.2): the UI must surface
+  "at or over consumption," not "storage broken." Flagged for the UI pass.
+- The two scopes map onto an intuitive physical distinction (money pools, bulk
+  goods sit in warehouses and need roads), so the split is teachable in one line.
+
+**Rejected alternatives:**
+- **Even-fill** (resources accumulate evenly across all non-empty storage): an
+  empire-wide pool wearing a settlement-local costume — it teleports a frontier
+  mine's output into the capital and nullifies severance (everyone fills in
+  lockstep). Rejected.
+- **Fill-local-first** (a settlement's production fills its own silos before
+  export): starves downstream consumers — a silo in a farm outpost would stop it
+  feeding the city it supplies. Rejected.
+- **Empire-wide materials/food storage:** defeats the purpose of networks and
+  makes road severance consequence-free. Rejected.
+
+**Open questions:**
+- **Player-controlled distribution priority.** The above is the *automatic*
+  distribution layer. A later system lets the player set intent over it — e.g., a
+  war-front settlement that wants to stockpile food, or reserve materials for a
+  build — as the §0.6 pattern applied to logistics (player sets priority, the
+  demand-first layer executes). Deferred to the QOL/directive phase (known-issues).
+- Base center storage capacity, silo capacity, and upkeep-per-unit magnitudes
+  (tuning; deferred).
 
 ---
 
@@ -305,3 +412,9 @@ existing category structure (ADR-0017), so no algorithm change.
 - `cities.md` §2.13 — tile improvement / district mechanism (the deposit-to-yield
   bridge).
 - `combat.md` §3.13 — chassis/component model (realizes the strategic gate).
+- `combat.md` §3.11 — field supply states; §9 here owns only the economic upkeep
+  draw.
+- `ancient-content.md` — the silo, furnace, and barracks buildings this section
+  references.
+- ADR-0028 — staffed-work production model. ADR-0030 — supply networks, storage,
+  and demand-first distribution.

@@ -23,12 +23,12 @@ After infrastructure, implement stages in pipeline order, visually validating ea
 
 5. **Combat — substantially designed.** Tactical model, batch commands, standing orders, strategic-level focus, unit scale (company, 1UPT), archetypes (soft RPS), veterancy with hard-death heroes, rail stacking with splash damage, upgrade mechanics, combat resolution (hybrid deterministic + bounded RNG), and supply/logistics (three-state with tech-unlock-coupled categories, pillaging, infrastructure vulnerability gradient) all settled. Remaining: city capture, frontage/flanking, naval, air, hierarchical orders (v2+). See `combat.md` §3.12.
 6. **City management tedium / production directives** — apply the intent-level pattern (pillar 0.6) to city production. Continuous-production directives, doctrine settings, automatic delivery. Same UI metaphors as combat batch commands. See `cities.md` §2.11.
-7. **Interactions between the four growth dimensions** — does footprint gate population, does development gate specialization, etc. Population now explicitly gates promotion (and via that, district radius); the assumption that population drives footprint growth is working but not locked. Whether development can outrun population needs a deliberate decision. Foundational — blocks city implementation.
-8. **Production/allocation model** — queues vs allocation vs job slots. Interacts with item 6. Foundational — blocks city implementation.
+7. **Interactions between the four growth dimensions** — **largely resolved.** The growth loop is pinned in `cities.md` §2.6: population drives footprint; population hard-gates promotion (and thus district radius) across tiers; development may outrun population only within a tier, bounded by maintenance and staffing. Staffing coupling is now concrete via the resolved staffed-work model (§2.7, ADR-0028). Remaining bits (auto-claim direction heuristics) are item 19, tuning-level.
+8. **Production/allocation model** — **resolved (ADR-0028).** Unified staffed-work model: job-slots produce continuous yields, build-slots consume materials to produce discrete objects; production capacity is district-owned with slots held by buildings, plus one bootstrap slot on the city center; co-location (base slots anywhere, matching-district boost, advanced buildings district-locked). See `cities.md` §2.7.
 9. **Specialization mechanics** — partially resolved. Specialization is chosen at outpost founding via the center building and can be reconfigured by replacing it (see `cities.md` §2.12). The remaining open question is whether specialization should also be influenced by surrounding geography (e.g., automatic specialization boosts when founded on ideal terrain), or whether the player choice is the only driver.
 10. **Migration system** — if population can move between settlements (recommended), the rules and infrastructure for it.
-11. **Emergent vs declared regions** — final decision. Foundational — affects infrastructure design, UI design, and trade flow implementation.
-12. **Infrastructure mode set** — roads, rails, ports, and their tradeoffs.
+11. **Emergent vs declared regions** — final decision still open, but narrowed: the Ancient supply network is an **explicit road graph** (ADR-0030, `cities.md` §2.9), and connectivity is a computed yes/no over those edges, which pushes toward emergent. What remains is the higher-level *region* abstraction (free flow within, gated flow between).
+12. **Infrastructure mode set** — **roads now exist from the Ancient era** as worker-built network edges (ADR-0030, `workers.md` §1, §3). Rails, ports, and their tradeoffs are still later-era design.
 13. **Unfed city behavior** — refined and partially resolved: outposts handle the "minimum-persistence" case naturally; cities that lose supply lose population back toward outpost tier but do not auto-demote. Player chooses whether to demote-and-rebuild or hold and rebuild supply. See `cities.md` §2.4.
 14. **Capital mechanic** — keep mobile/descriptive (current direction) or revisit.
 15. **UI/legibility systems** — dashboards, alerts, overlays. Non-trivial dev budget. Especially important given pillars 0.2 (knowledge as progression) and 0.6 (intent-level specification).
@@ -106,12 +106,12 @@ Each is reasonable in isolation. Together, late-game turn processing could becom
 **Items now resolved (no longer blocking):**
 - **Tile ownership granularity (§2.2)** — superseded by `cities.md` §2.14 (empire-level ownership) and the §2.13 district-vs-claim distinction. The original "core / developed / influenced" three-tier proposal is replaced by "district tile / claimed-and-worked tile / claimed-but-unworked tile."
 - **Expansion vs Development (§2.8)** — now has a concrete spatial mechanism via `cities.md` §2.13. Expansion claims tiles; development places districts.
+- **Production/allocation model (§2.7)** — resolved as the unified staffed-work model (ADR-0028). §2.11's directive prescriptions now sit on a defined production model.
+- **Four growth-dimension interactions (§2.6)** — growth loop pinned; staffing coupling concrete via §2.7. Only auto-claim direction heuristics remain (tuning).
 
 **Items that still block downstream work:**
-- **Interactions between the four growth dimensions (§2.6)** — city design has structural holes until this is decided. Does footprint gate population? Does development gate specialization? Can't fully implement city mechanics without answers.
-- **Production/allocation model (§2.7)** — section §2.11 (city management tedium) prescribes solutions that assume a production model. Can't be implemented without it.
-- **Emergent vs declared regions (§2.9)** — affects infrastructure design, UI design, and trade flow implementation.
-- **Specialization mechanics (open topic)** — interacts with city design, AI city management, and the four-dimensions question.
+- **Emergent vs declared regions (§2.9)** — narrowed by the explicit Ancient road graph (ADR-0030) but the region abstraction is not finalized; still affects UI and trade-flow design.
+- **Specialization mechanics (open topic)** — the geography-influence question interacts with city design, AI city management, and the four-dimensions question.
 
 **Required action:** When implementation begins for city systems, these decisions must be resolved first. They are not optional refinements.
 
@@ -127,6 +127,9 @@ Each is reasonable in isolation. Together, late-game turn processing could becom
 - Hard-death heroes (§3.7) assume heroes are meaningfully stronger than green units
 - Upgrade-vs-replacement (§3.9) assumes upgrade cost is calibrated to combat value
 - Combat resolution (§3.10) assumes strength ratios are meaningful and tunable
+- Ancient walls (§3.10, ADR-0032) ship **without a siege counter**, so the
+  wooden-wall edge bonus must be validated as *costly-but-surmountable by assault*,
+  never impregnable — a direct dependency on the strength model, not a free knob.
 
 **Status:** Cannot validate the combat design without rough balance numbers, even placeholder values. "Tuning" is treated as separate but some tuning affects whether mechanics work at all.
 
@@ -167,6 +170,18 @@ Each is reasonable in isolation. Together, late-game turn processing could becom
 - **Amenity system is structurally complete but untuned.** Per-luxury amenity
   amount, demand-per-population curve, and growth bonus/penalty magnitudes are
   placeholders (`resources.md` §5). Deficit penalty stays weak until later eras.
-- **Worker / tile-improvement verb set undesigned.** It is the deposit-to-yield
-  bridge (`resources.md` §7); until designed, no deposit produces a yield. Next
-  system in the dependency chain.
+- **Worker / tile-improvement verb set** — **designed** (`workers.md`): the
+  deposit-to-yield bridge, the Ancient improvement set, roads, and district
+  siting are specified. Remaining items there are tuning (build durations) and
+  the deferred automation resolver.
+- **Player-controlled distribution priority.** The supply system's automatic
+  layer is demand-first with surplus-to-storage (`resources.md` §9, ADR-0030).
+  A later system lets the player set intent over it — e.g., a war-front
+  settlement stockpiling food, or reserving materials for a build — as the §0.6
+  pattern applied to logistics. Deferred to the QOL/directive phase; recorded so
+  the automatic layer is built to accept an override.
+- **Antique-district yield magnitude (cross-currency, untuned).** Neglected
+  districts convert to culture/tourism (`cities.md` §2.13, ADR-0029). The
+  balancing invariant — antique yield compensates for but never exceeds forgone
+  modern yield in expectation — cannot be tuned until culture and tourism exist.
+  Recorded now, tuned later.

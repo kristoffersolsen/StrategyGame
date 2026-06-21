@@ -97,10 +97,12 @@ requires a population threshold (§2.12), so a settlement cannot build a
 city-scale district count on outpost-scale population. Within-tier overbuilding
 (filling district slots faster than population justifies) is not hard-blocked and
 is not policed by an elapsed-turn timer. It is bounded by maintenance cost
-(empty districts are a net drain) and, pending §2.7, by staffing (an unstaffed
-district produces nothing). If a decay mechanic proves necessary after §2.7 is
-resolved, it attaches to a learnable cause — unmet maintenance or lack of
-staffing population — never to elapsed turns, consistent with pillar 0.2.
+(empty districts are a net drain) and by staffing: under the resolved staffed-work
+model (§2.7, ADR-0028) an unstaffed job-slot produces nothing and an unstaffed
+build-slot constructs nothing, so overbuilding past the population that can staff
+it is self-limiting. If a decay mechanic proves necessary it attaches to a
+learnable cause — unmet maintenance or lack of staffing population — never to
+elapsed turns, consistent with pillar 0.2.
 
 
 **Rationale:** A trading hub and a mining town aren't differentiated by "size" —
@@ -115,16 +117,17 @@ limiter tied to cause (pillar 0.2) and avoids per-district manual repair tedium
 without a third penalty.
 
 **Risks:**
-- Within-tier overbuild pressure depends on §2.7. If the production model does
-  not couple yield to staffing, maintenance alone may be too weak a limiter and
-  the question reopens.
+- Within-tier overbuild pressure depends on staffing coupling. The resolved
+  staffed-work model (§2.7, ADR-0028) couples yield to staffing directly, so
+  maintenance plus staffing is the intended two-part limiter; if tuning ever
+  decouples them, the question reopens.
 - Population-driven auto-claim can surprise the player if the "best next tile"
   heuristic doesn't match intent.
 
 **Mitigations:**
-- The §2.7 resolution should be evaluated against this section: the job-slot
-  model (buildings create slots, population fills them) makes the population↔
-  development relationship fall out for free and is the leading hypothesis.
+- The staffed-work resolution (§2.7) makes the population↔development relationship
+  fall out for free: buildings hold the slots, population fills them, and an
+  unstaffed slot is inert. This is what §2.6 needed and is now locked.
 - Auto-claim's next-tile selection must use a deterministic tiebreak (pillar
   0.4) and surface an "expand toward" directive plus per-tile override (§0.6,
   §2.13).
@@ -133,33 +136,111 @@ without a third penalty.
 - Specialization-as-geography influence (§2.12 open question) is independent of
   the growth loop and remains open.
 
-### 2.7 Production Model
-**Status:** Not finalized.
+### 2.7 Production / Allocation Model
+**Decision:** A unified **staffed-work** model (ADR-0028). One primitive — a
+staffed position filled by population — produces two kinds of output:
 
-The conventional "two queues (units, buildings)" model was challenged. The current direction leans away from it toward something closer to **resource allocation** (production capacity split by priority/policy) or Stellaris-style **job allocation** (jobs produce resources, buildings create job slots).
+- **Job-slots** produce a **continuous yield** while staffed (science, culture,
+  food, building materials).
+- **Build-slots** are staffed positions that **consume building materials over
+  time to produce one discrete object** (a unit or a building). A shared
+  per-category queue feeds the build-slots; **parallelism equals build-slot
+  count** (the Stellaris shipyard-module pattern).
 
-**Gold is empire-wide; bulk goods are not — a deliberate scope asymmetry.** Gold
-(currency) accumulates at the empire level because currency is fungible and pools
-at the polity level. Building materials and food do not: they are bulk goods,
-provisionally city-local (see open question below). Two scope models coexist in
-one economy by design. Gold is yield-only with no sink in the Ancient era (a
-deliberate stub; `resources.md` §6). Do not infer from "empire-wide gold" that
-materials follow — they do not.
+This is one economy, not two: job-slots *produce* the materials that build-slots
+*consume*. There is no separate abstract "production"/"hammers" yield to balance
+against the materials economy.
 
-- Whether build-slots draw from a single region materials pool or a city-local
-  stock. Still open, interacts with regions/infrastructure (§2.9). Resolved for
-  gold only: gold is empire-wide (`resources.md` §6); the materials scope is
-  independent of that decision.
+**Production capacity is district-owned, and slots are building-held — a
+deliberate inversion (ADR-0028).** Build-slots and job-slots belong to the
+**buildings** constructed inside districts, not to the district type and not to
+a city-level production stat. The one hardcoded exception is the **city center**,
+which holds exactly one serial **bootstrap build-slot** (warrior, worker, scout,
+settler, basic buildings, and placing districts, at baseline rate). An **outpost
+center has no build-slot and cannot build** (§2.12); outposts are developed by
+worker-placed districts whose buildings are constructed by a road-connected
+city's build capacity (§2.9, `resources.md` §9, ADR-0030). Beyond the single
+bootstrap slot, a settlement with no production buildings has no production
+capacity. The inversion is what makes the feeder-outpost empire shape (§2.9)
+load-bearing rather than optional.
 
-**Future aspects:**
-- Pick a production/allocation model. This is gated on the four-dimensions interactions discussion.
+**Co-location: base slots anywhere, the matching district boosts, advanced
+buildings are locked (ADR-0028).** A building provides its slots at **base rate
+in any district** — an encampment placed in a housing district still yields real
+unit-build capacity. The building's **matching** district multiplies its output,
+and is the **only** place its advanced/era successors may be built (an Industrial
+factory needs an Industrial production district; a Classical academy needs a
+campus). So basic buildings are flexible and advanced ones are district-locked;
+restrictiveness rises with tier. The soft incentive is the boost; the load-bearing
+rule is the lock — specialization wins at scale because advanced capability is
+unavailable off-type, not merely weaker.
 
-### 2.8 Expansion vs Development
-**Decision:** Claiming a tile (expansion) and building on a tile (development) are **separate actions** with separate costs.
+**A third conditioning axis: settlement tier (`buildable_in`, ADR-0028).** Beyond
+*which district* and *basic-vs-advanced*, a building may be scoped to a set of
+**settlement tiers** — an optional `buildable_in` attribute; absent it, the building
+builds anywhere. The Ancient **mill** is `buildable_in: {outpost}` (the first
+instance), and the archetype is bidirectional (later eras add city-only buildings).
+The cost of this axis is a building that can't be placed somewhere, a potential
+legibility trap; it is paid down by **disallow-on-build** (the settlement refuses
+it outright — no dead building) and, where an outpost-scoped building would be
+stranded by promotion, **destroy-on-promotion** (a surfaced cost, §2.12). This axis
+is a deliberate, recorded extension of the building model, not a content-registry
+quirk (`workers.md` §2).
 
-**Rationale:** Conflating them (Civ 6) makes optimal play "always claim aggressively because claiming = function." Separating them lets territory be claimed speculatively/defensively while real investment is reserved for development. Also makes claimed-but-undeveloped territory worth fighting over.
+**Three distinct verbs**, never conflated:
 
-The concrete spatial separation is specified in §2.13: expansion claims tiles, development places districts.
+- **Place a district** — a worker action, or the city center's bootstrap slot
+  (§2.12, `workers.md` §1). A production district cannot place the first
+  production district.
+- **Build a unit** — a build-slot output; the unit leaves to the field.
+- **Construct a building** — a build-slot output; the building then lives in its
+  destination district and contributes its slots there.
+
+**Resource gating is hybrid.** The critical path is buildable from base-tier
+materials (lumber, stone); higher-tier resources (copper, then iron) gate
+**strength and efficiency, never progression** (`resources.md` §2–§3). For units
+the gate is realized by the chassis/component model (`combat.md` §3.13).
+
+**Scope: materials and food are network-local; currency, science, and culture are
+empire-wide (ADR-0030).** Building materials and food are **stored per
+settlement** (the center has base capacity; a silo building adds more) and
+**spent across the road-connected network** (`resources.md` §9). Gold, science,
+and culture accumulate empire-wide. Two scope models coexist by design: currency
+and abstract yields pool at the polity level; bulk goods sit in physical storage
+and travel only over infrastructure. This supersedes the earlier provisional
+"materials are city-local" note. Gold is yield-only with no sink in the Ancient
+era (a deliberate stub; `resources.md` §6).
+
+**Rationale:** Unifying yields and construction under one staffed primitive is
+fewer moving parts than parallel "jobs" and "queues" systems (pillar 0.5), and
+the producer/consumer relation (job-slots make materials, build-slots spend them)
+removes the need to invent and balance a second production currency. Building-held
+slots make the district-owned inversion concrete and testable, and co-location
+exposes a real early build-order decision (hybridize a scarce district vs. commit)
+without letting generalist cities dominate. Network-local goods with empire-wide
+currency matches the physical reality the design wants — supply lines matter,
+money does not need roads.
+
+**Risks:**
+- The building-held-slot model can be quietly re-collapsed into a city-level
+  production stat that districts increment, which dissolves the inversion.
+- Co-location's boost magnitude is a tuning knob that, set wrong, makes
+  flexibility either a trap or a dominant strategy.
+
+**Mitigations:**
+- **Implementation invariant (ADR-0028):** build-capacity is a property of
+  building entities sited in districts, plus one hardcoded city-center bootstrap
+  slot. It must never be modeled as a city-level production stat. Flagged
+  precisely because the intuitive default contradicts it.
+- The advanced-building **lock** (not the boost) carries the specialization
+  pressure, so balance does not hinge on tuning the boost perfectly.
+
+**Open questions:**
+- Per-slot throughput as a function of staffing level and materials supply
+  (tuning; deferred).
+- Player-controlled distribution priority over the automatic demand-first layer
+  (`resources.md` §9) — e.g., a war-front settlement reserving food. Deferred to
+  the QOL/directive phase (known-issues).
 
 ### 2.8 Expansion vs Development
 **Decision:** Claiming a tile (expansion) and building on a tile (development) are **separate actions** with separate costs.
@@ -176,7 +257,20 @@ The concrete spatial separation is specified in §2.13: expansion claims tiles, 
 - Infrastructure has **capacity limits** — a road/rail can only carry so much flow. Exceeding capacity gates further growth.
 - Players see per-city and per-region statistics including which cities are struggling.
 
-**Open question:** Are regions **emergent from infrastructure topology** (cities sufficiently connected are automatically grouped) or **player-declared with infrastructure requirements** (player draws region boundaries, system validates connections)? Strong recommendation is emergent; not yet locked.
+**Ancient-era seed (ADR-0030).** The network is concrete from the Ancient era:
+**roads are a worker-built infrastructure job** (`workers.md` §1) and form the
+explicit graph over which materials and food are spent (`resources.md` §9). A
+settlement's reach is its road-connected component; severing a road splits the
+network. This is the minimal seed of the region/infrastructure system — proximity
+plays no part, only explicit connectivity — and it is what makes distant settling
+hard and the trade-network shape emerge early.
+
+**Open question:** Are regions **emergent from infrastructure topology** (cities
+sufficiently connected are automatically grouped) or **player-declared with
+infrastructure requirements**? The Ancient road graph pushes toward emergent —
+connectivity is a computed yes/no over explicit edges, which is the legible
+answer — but the higher-level *region* abstraction (free flow within, gated flow
+between) is still not locked.
 
 **Rationale:** Regions provide micro-management abstraction without removing depth. Infrastructure as the gating mechanism unifies the player's complexity-management tool (regions) with their strategic depth tool (logistics). Capacity limits force megacities to sprawl outward and collect resources from multiple sources, which is the intended "city footprint plus supply network" vision.
 
@@ -211,6 +305,7 @@ The concrete spatial separation is specified in §2.13: expansion claims tiles, 
 - Designate a set of cities to follow an empire-level "doctrine" (e.g., "military production," "economic infrastructure," "rebuild after war") that drives their production queues
 - Automatic delivery of produced units to the frontlines or designated rally points
 - Empire-level standing directives for tile development matching city specialization
+- Empire-level **district modernization** directive (§2.13 antique districts): the player sets which districts to modernize and at what priority; the system performs the demolish-and-rebuild. Highest-volume case is housing, which must never be modernized by per-neighborhood manual clicks.
 - Alert system for "this directive can't be fulfilled" (missing resources, infrastructure, etc.)
 
 Same pattern, same UI metaphors as combat batch commands and standing orders. The systems should feel unified.
@@ -227,9 +322,40 @@ Same pattern, same UI metaphors as combat batch commands and standing orders. Th
 
 **Founding mechanism.** A settler unit founds a settlement on a chosen tile. On founding, the settlement is a bare center district (visually: a few tents) with no specialization. The player must immediately begin construction of a center building. Specialization options at outpost tier include mining, farming, fort, and trading post; productive types (mining, farming) are cheaper and faster to complete than military types (fort, castle). During construction the settlement is highly vulnerable — this is intentional and aligns with §2.3 (expansion as economic investment, with real risk).
 
+**The capital begins as a city; later settlements begin as outposts.** The
+initial settlement is founded at **city tier** (a city center with the one
+bootstrap build-slot, §2.7), so the game can bootstrap from turn one. This is a
+starting condition, not a permanent capital bonus (§2.5). Every *subsequently*
+founded settlement begins as an outpost.
+
+**How settlements build (ADR-0030).** A **city center can build** (its bootstrap
+slot, plus build-slots in any production buildings it constructs). An **outpost
+center cannot build at all.** Outposts are developed instead by **workers placing
+district footprints** (`workers.md` §1) whose **buildings are constructed by the
+build capacity of a road-connected city**, drawing that city's network materials
+(`resources.md` §9). An outpost with no road to a city can still have its tiles
+improved by workers (worker-time only, `workers.md` §5) but cannot have districts
+or buildings constructed — which is exactly the support-from-a-city dependency
+that makes distant settling hard and roads worth building (§2.9).
+
 **Promotion to city.** Once an outpost meets a population threshold and has the required materials, it can begin constructing a city hall in the center district. The city hall replaces the outpost specialization building. Completion of the city hall is the promotion event in mechanical terms; the player experiences it as "I built a city hall," not "I promoted my outpost." The same pattern continues for further administrative tiers (see §2.13 on district radius progression).
 
-**Demotion.** Constructing an outpost specialization building over an existing city hall demotes the city back to outpost. Districts outside the outpost's reduced radius become unusable and must be returned to natural state by workers before the surrounding tiles can be re-used. The cost of resetting a district should be roughly equal to the cost of building it — neither encourages flippant restructuring nor punishes legitimate strategic retreat (e.g., abandoning a frontier city before an unwinnable war).
+**Specialization bonuses are part of the promotion trade.** An outpost
+specialization center may carry a yield effect — the **farming** center applies a
+**food multiplier** over the whole settlement's food output (`ancient-content.md`).
+Because promotion **replaces** the specialization center with a city hall, that
+multiplier is lost. Independently, buildings scoped to outposts via `buildable_in`
+(§2.7) — the Ancient **mill** is the first — **cannot exist in a city and are
+destroyed on promotion**, with the teardown surfaced as a promotion cost. The two
+effects **compound**: promoting a developed farm outpost surrenders the multiplier
+*and* its mills at once, so the most-developed specialized outposts are the least
+worth upgrading. This is intended — the city upgrade path is meant to come from
+trade and defense, not from a settlement's own farm output — and it is the chosen
+counter to a giant farming city out-producing the feeder-outpost shape (§2.9). The
+advantage must stay a gradient: a city still partially self-feeds, or a single road
+cut starves it (`resources.md` §9).
+
+**Demotion.** Constructing an outpost specialization building over an existing city hall demotes the city back to outpost. Because districts are fixed multi-tile footprints (§2.13, ADR-0029), demotion is **atomic**: any district whose footprint leaves the reduced radius is orphaned whole — there is no partial-tile shrink — and must be returned to natural state by workers before the surrounding tiles can be re-used. The reset cost scales with district size and is roughly equal to the cost of building it — neither encouraging flippant restructuring nor punishing legitimate strategic retreat (e.g., abandoning a frontier city before an unwinnable war).
 
 **Center building tiers.** Each successive center building tier requires higher population and material investment than the last, gates a larger district radius (§2.13), and shifts the settlement further from producer to consumer:
 
@@ -274,13 +400,15 @@ The construction-vulnerability pattern repeats at every tier — building a city
 
 **Decision:** Settlements occupy space along **two separate axes** that should not be conflated: **districts** (built infrastructure on owned land, used for housing and economic specialization) and **claimed tiles** (territorial claim, used for working land — farming, mining, foresting, etc.).
 
-**Districts.** Districts are built within a radius around the settlement's center, gated by the center building tier (§2.12):
+**Districts.** Districts are **fixed multi-tile footprints** of built infrastructure, sited on owned tiles within a radius around the settlement's center. The center building tier (§2.12) gates the radius — the *tile area* available for footprints, not a count of single-tile districts:
 
-- Outpost specialization: 1-tile district radius (6 adjacent slots).
-- City hall: 2-tile district radius (up to 18 slots).
-- Higher administrative tiers: up to 3 (and possibly more in late eras), with the metropolis as the natural endpoint.
+- Outpost specialization: 1-tile district radius (the 6-tile inner ring).
+- City hall: 2-tile district radius (the inner two rings).
+- Higher administrative tiers: 3 and beyond in late eras, with the metropolis as the natural endpoint.
 
-District construction is bounded by the radius but does not have to fill it. Districts include housing, specialized production (limited factories, refineries, trade terminals), and similar built infrastructure. Adjacent districts can interact (adjacency bonuses) but each district occupies one tile.
+A district occupies a **fixed compact footprint** whose size is an era stamp (see *District footprints scale with era* below): housing is always 1 tile; the Ancient production and military districts are 2 tiles. The footprint is a fixed shape placed by the player as a unit — the player sites *what and roughly where*, not a free packing of individual tiles (compact shapes keep orientation near-irrelevant, and 1-tile housing is the filler that fits the gaps). Districts hold buildings, which hold the job-slots and build-slots (§2.7); adjacent districts can interact (adjacency bonuses). Construction is bounded by the radius but need not fill it.
+
+**Terrain eligibility (ADR-0029).** A district footprint tile may sit on any terrain **except mountains and open water**. **Cliffs do not block placement** — a compact footprint may straddle a cliff edge, with its tiles on different height tiers (a terraced settlement). Keeping eligibility permissive is a deliberate mitigation of the placement-jigsaw the fixed-shape decision accepts; only the genuinely unbuildable is excluded.
 
 **Claimed tiles.** Claimed tiles are the settlement's territorial extent. Tile-working (farms, mines, forestry) happens on claimed tiles *outside* the district zone. Farms and mines are **not** districts; they are improvements on claimed land. The maximum claim radius is larger than the maximum district radius, and grows with the settlement (driver and rate are open questions, see below).
 
@@ -292,7 +420,23 @@ District construction is bounded by the radius but does not have to fill it. Dis
 
 **District claim priority.** The first district to be built on a tile claims that tile for itself. Once a tile holds a district, no other district can claim it. This is independent of (and stricter than) ordinary tile claiming — the district *is* the use; the tile is locked to that district until the district is removed.
 
-**Inner ring guarantee.** Settlement minimum spacing (§2.14) is set so that the inner 1-tile ring around any settlement's center is always uncontested by neighbors. This guarantees every settlement, however densely packed, can place at least its inner-ring districts. Outer rings may be contested in dense areas; first-construction wins.
+**Inner ring guarantee.** Settlement minimum spacing (§2.14) is set so that the inner 1-tile ring around any settlement's center is always uncontested by neighbors. This guarantees every settlement, however densely packed, can place at least its inner-ring districts — and because housing is a 1-tile footprint, the always-available filler. Outer rings may be contested in dense areas; first-construction wins.
+
+**District footprints scale with era — size is the era stamp (ADR-0029).** A district type has **one footprint size per era**, and the size bumps only in that type's **focus era**, so no single era boundary forces a whole-city rebuild:
+
+- **Housing** — 1 tile, every era. Modernization is in-place (a modern neighborhood replaces an old one on the same footprint), so housing never re-solves its shape.
+- **Production** — 2 tiles (Ancient) → 3 (Industrial) → 4 (Modern).
+- **Military** — 2 tiles (Ancient) → 3 (Medieval) → 4 (Modern).
+
+**Modern buildings need modern districts.** An advanced/era building is locked to its era-tier district (§2.7); to host it the player must rebuild the district at the larger footprint. This is why a larger footprint is worth building — not a linear "more tiles, more slots," but exclusive access to the era's advanced buildings and boosts. Between researching an advanced building and rebuilding the district, the existing district and its buildings keep working at their current tier; nothing is auto-upgraded or stranded — the player chooses **when** to modernize.
+
+**Cost asymmetry: cheap to demolish, full price to rebuild.** Clearing an obsolete district is cheap (it is just clearing ground); the larger replacement costs its full footprint. The player is not taxed for *having* an old district, only for the *upgrade* — which is the actual investment. This keeps modernization affordable without making the original commitment cheap to walk back.
+
+**Antique districts (ADR-0029).** A district left un-modernized across eras converts to an **antique** state, yielding **culture (and, later, tourism)** instead of its original low-tier output. The longer it is neglected, the stronger the antique yield. This is a genuine fork, not a refund: the choice is **where limited modernization throughput goes each era** (better science now, or military, or production) — a district you never got around to modernizing turns into an asset rather than a regret (discovered, not tutorialized, pillar 0.2). Upgrading one tier behind leans "just modernize" (low opportunity cost); two or three tiers behind is where the antique payoff makes deliberate neglect a real option.
+
+- **Balancing invariant.** Antique yield **compensates for forgone modern yield; it never exceeds it in expectation.** It is cross-currency (you give up production/military/science for culture/tourism), so the magnitude cannot be set until those systems exist — recorded now, tuned later. Deliberate relic-farming (never modernizing to harvest culture) is self-limiting because neglect costs current-tier yield continuously and culture is not a standalone win.
+- **Conversion granularity.** Because a larger district is often built *over* a smaller one, antique status may attach to a whole demolished district **or** to individual orphaned tiles of a partial rebuild. The dense tile-state model supports per-tile era/yield state, so the per-tile case is cheap to allow.
+- **Execution is a directive, not a chore (§0.6).** Modernization is issued as an empire-level "modernize these districts" directive with per-settlement override — the player sets the priority (the interesting decision); the system performs the demolish-and-rebuild (the tedious execution). Housing especially needs this: it is the highest-count, highest-frequency modernization, and must never be a per-neighborhood manual click. See §2.11.
 
 **Rationale.**
 

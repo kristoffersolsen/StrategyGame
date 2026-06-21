@@ -272,7 +272,49 @@ Compute strength ratio between attacker and defender after all modifiers (base s
 - Resolution order rules for simultaneous combats
 - Multi-unit combat prediction UI (one attacker, multiple potential defenders within range)
 
-### 3.11 Supply and Logistics
+#### Per-edge defense (walls and natural blockers, ADR-0032)
+
+**Decision:** Defensive modifiers attach to **tile edges**, not only to tiles. When
+a unit attacks **across an edge**, that edge's defensive value feeds the defender
+side of the strength ratio above. A single **shared edge-defense model** holds both
+natural and built blockers in the same units:
+
+- **Natural:** a cliff edge (ADR-0012, `edge_class` delta ≥ 2), a river edge, a
+  coastline.
+- **Built:** a **wall** segment (worker-built per-edge state, `workers.md` §3).
+
+This is why settlement defense rewards terrain: a district edge already backed by a
+cliff or river carries edge-defense for free, so the player walls only the open
+sides. Multiple wall layers need no special rule — an attacker advancing through an
+outer and then an inner walled ring simply pays the edge-defense modifier at each,
+which is the "sieges are an investment" property emerging from one mechanism.
+
+**Ancient walls are wooden.** They grant a defender bonus across the walled edge and
+nothing more: **no damage/destruction model** (a wall is static edge state until its
+tile is captured) and **no siege equipment** to counter them yet — both are later
+eras.
+
+**Invariant (the no-siege-counter guardrail):** because the Ancient era ships walls
+without a siege counter, the wooden-wall bonus must be tuned so that a walled tile
+is **always takeable by direct assault** — bloodier and slower, never impregnable.
+If the bonus is set high enough to make a walled city unassailable, Ancient warfare
+stalls until a later era. This is a balance dependency on the unit-strength model
+(§5.4 of `known-issues.md`), not a free parameter.
+
+**Rationale:** Unifying walls with natural blockers on one edge channel makes
+"use the terrain" structural rather than an emergent hope, reuses the edge-state
+machinery roads already established (pillar 0.5), and leaves a clean seam for siege
+to extend later (siege acts on wall edge-state). Edge-based modifiers also slot
+directly into the existing strength-ratio computation as one more defender term.
+
+**Open questions:**
+- Whether river/coast edges contribute the same magnitude as a wooden wall, or less
+  (tuning).
+- Stacking rule when an edge has both a natural blocker and a wall (cap, or
+  diminishing); leaning "take the stronger, do not fully add" for legibility.
+- Wall segment cost and bonus magnitude (tuning; the structural model is settled).
+
+
 
 **Decision:** Three-state supply with grace-period buffers. Supply categories unlock with the units that need them, paired with required production infrastructure. Foraging mediates between in-supply and out-of-supply for eligible units.
 
@@ -444,13 +486,27 @@ Research of new *types* (e.g., siege in the Classical era) remains.
   rather than replacing the unit. Re-equip happens at a city or within supply
   range (§3.11), not free in the field.
 
-**Ancient-era scope.** Base chassis (warrior, spearman, archer; plus the
-non-combat worker, scout, settler) plus a **single bronze augment tier**. Bronze
-is the era's defining material, so "base chassis + one bronze component" is both
-the simple system the era wants and thematically exact. The full multi-slot
-component designer blooms in the Classical era and later (iron, then specialized
-component classes). The general model is settled now; the ancient era implements
-only the single-augment slice.
+**Ancient-era scope (ADR-0031).** Base chassis are **warrior** (melee) and
+**archer** (ranged), plus the non-combat worker, scout, and settler — **not**
+"warrior, spearman, archer." The era's single component slot is the **weapon**,
+and its augment tier is **bronze** (copper-gated, `resources.md` §3). The
+**spear is the Ancient melee weapon component**: a warrior equipped with the
+bronze spear surfaces as the named unit **"Spearman."** This is the chassis model
+working as designed — "spearman" is a *named loadout*, not a separate chassis — and
+it generalizes cleanly: the Classical iron **sword** on the same warrior chassis
+surfaces as **"Swordsman."** Bronze is the era's defining material, so "warrior or
+archer chassis + one bronze weapon" is both the simple system the era wants and
+thematically exact. The full multi-slot component designer blooms in the Classical
+era and later.
+
+- **Archers gate behind a building, not the center.** The warrior, worker, scout,
+  and settler come from the city center's bootstrap build-slot (`cities.md` §2.7);
+  the **archer chassis is unlocked by the encampment** (a military-district
+  building, `ancient-content.md`), giving the military district an early reason to
+  exist.
+- **Ancient unit upkeep is food.** Units draw a continuous food upkeep from their
+  network (`resources.md` §9), tying army size to the agricultural base; the
+  barracks building reduces it. Field-supply states are §3.11.
 
 **Rationale.** Collapses an N×M redundant tech ladder (every archetype × every
 strength tier) into orthogonal component lines researched once — fewer techs,
@@ -475,9 +531,10 @@ rather than patched.
 - Design the template/doctrine layer as the primary interface from the start;
   manual equipping is the override.
 - The within-archetype invariant is enforced in the model, not left to tuning.
-- **Name loadouts** so research still delivers a *named unit* (a bronze-equipped
-  spearman surfaces as a named unit, not a stat delta), recovering the
-  milestone reward while keeping the orthogonal-component structure.
+- **Name loadouts** so research still delivers a *named unit*: a bronze spear on
+  the warrior chassis surfaces as a **Spearman**, an iron sword (Classical) as a
+  **Swordsman** — a named milestone, not a stat delta — while the underlying
+  structure stays orthogonal components on a fixed chassis.
 
 **Open questions.**
 

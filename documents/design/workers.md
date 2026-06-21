@@ -13,12 +13,22 @@ global chapter number when slotting it beside the existing design docs.
 
 ---
 
-## 1. Scope: the baseline layer, not districts
+## 1. Scope: the baseline layer, and district siting
 
-**Decision:** Workers build **tile improvements** — farms, mines, forestry, and
-the like — on claimed tiles. Workers do **not** build districts; districts are
-city production output (`cities.md` §2.7) placed within the center's gated radius.
-The two layers are distinct and were separated deliberately in `cities.md` §2.13:
+**Decision (revised, ADR-0030):** Workers build **tile improvements** — farms,
+mines, forestry, and the like — on claimed tiles, **and place district footprints**
+on owned land (the act of siting a district's fixed multi-tile shape, `cities.md`
+§2.13). Workers do **not** construct the buildings inside those districts and do
+not run build-queues: building **construction** is a build-slot output of the
+staffed-work economy (`cities.md` §2.7), consuming network materials. For an
+**outpost** — whose center cannot build (`cities.md` §2.12) — the worker places the
+district footprint and a **road-connected city's build capacity constructs the
+buildings** over the network (`resources.md` §9). This supersedes the original
+"workers do not build districts" scope; placing a district was already a worker (or
+city-center) function in the resolved §2.7 model.
+
+The improvement and district layers remain distinct, as separated in `cities.md`
+§2.13:
 
 - **Improvements** are the low-efficiency baseline on claimed tiles, generally
   outside the district zone.
@@ -28,12 +38,17 @@ The two layers are distinct and were separated deliberately in `cities.md` §2.1
 That efficiency asymmetry is a load-bearing invariant (`cities.md` §2.13): it is
 what keeps outposts and the core-plus-feeder empire shape (§2.9) meaningful. This
 document must not erode it — improvements stay the baseline, never a substitute
-for district development.
+for district development. What changed is only **who sites a district** (a worker
+can), not the asymmetry between improvements and districts, nor who *constructs*
+its buildings (build-slots, §2.7).
 
-**Rationale:** Keeping the worker layer to baseline extraction preserves the
-two-axis model's legibility (build infrastructure vs. work land) and prevents
-worker improvements from drifting into district territory and flattening the
-asymmetry.
+**Rationale:** Keeping the worker layer to baseline extraction plus district siting
+preserves the two-axis model's legibility (build infrastructure vs. work land)
+while giving outposts a buildable path that needs no per-outpost build-queue —
+construction is borrowed from a connected city. Letting workers *construct*
+buildings was rejected: it would add a parallel construction path against pillar
+0.5 and force an early materials-transfer system; routing construction through the
+network's existing build capacity avoids both (ADR-0030).
 
 ---
 
@@ -82,6 +97,29 @@ This set covers every Ancient-era resource (`resources.md` §8). It is a content
 list, expected to grow; the five functional verbs are what the mechanics and the
 tech tree (Section 8) actually reason about.
 
+**Roads — worker-built network infrastructure (ADR-0030).** In addition to the
+five yield improvements, the Ancient worker builds **roads**. A road is not a
+yield improvement: it is the **edge** of the supply network (`cities.md` §2.9,
+`resources.md` §9) over which materials and food are spent, and it is what lets a
+city's build capacity reach an outpost to construct its buildings (`cities.md`
+§2.12). Roads are the era's first logistics layer; without them an outpost cannot
+be built up and distant settling is hard — the intended pressure. Like
+improvements, a road costs **worker-time**; whether it also costs materials is
+tuning, deferred (Section 5).
+
+**Walls — worker-built defensive edges (ADR-0032).** The worker also builds
+**walls**, the Ancient era's settlement defense. A wall, like a road, is **per-edge
+state**, not a tile improvement, and reuses the same edge-state machinery; it is
+placed on the **edges of district tiles** (the built-up perimeter). A walled edge
+contributes to a **shared per-edge defense model** alongside natural blockers
+(cliffs, rivers, coast), so backing a settlement onto a cliff and walling only the
+open sides falls out structurally — the cliff already defends its edge. Unlike
+improvements, a wall costs **worker-time *and* a modest base-materials (lumber)
+charge per segment** (the deliberate exception in Section 5). Ancient walls are
+**wooden**: a defender bonus when attacked across the walled edge, surmountable by
+assault, with no damage model yet — siege is a later era (`combat.md` §3.10,
+ADR-0032).
+
 **Open questions:**
 - Whether pasture splits into a food variant and a horse variant or stays one
   entry parameterized by what the tile offers. Content-layer decision; defer.
@@ -119,14 +157,42 @@ and the worker is itself the cost gate (you spent production to have one). Keepi
 the materials pool for districts, buildings, and units (`cities.md` §2.7) keeps
 the early economy legible.
 
+**Walls are the one exception — and a deliberate one (ADR-0032).** Walls (Section 3)
+are worker-built but **do** cost base materials per segment, opening early the
+"construction-grade improvements that cost materials" question this section
+otherwise defers. The reason is design, not bookkeeping: a materials cost is what
+makes walling a whole perimeter a real **guns-vs-walls** choice (the lumber spent on
+walls is lumber not spent on units or buildings) rather than a no-brainer for idle
+workers. Improvements stay worker-time-only; walls are the named exception.
+
+**The worker is the cost gate, which makes the worker's own cost load-bearing.**
+Because improvements, roads, and now walls are all gated by worker-time, the
+**creation and maintenance cost of the worker unit itself** is one of the most
+important tuning levers in the early game — more so than any single improvement's
+duration. Set worker create/upkeep cost too low and the entire baseline layer
+(economy, logistics, *and* defense) gets done trivially, collapsing the scarcity the
+two-axis model and the supply network depend on; set it too high and the baseline
+starves and outposts never develop. Walls sharpen this: worker-time is now a single
+pool traded off across **economy (improvements), logistics (roads), and defense
+(walls)** simultaneously, so worker scarcity is the knob that balances all three
+against each other. Workers also draw food upkeep like other units (`resources.md`
+§9, ADR-0031), so both the build cost and the ongoing upkeep are levers. This must
+be tuned with the whole baseline layer in view, not per-improvement; flagged as a
+first-class tuning concern for the economy prototype.
+
 **Open questions:**
-- Build duration per improvement (tuning; no magic number committed).
+- Build duration per improvement, and per wall segment (tuning; no magic number
+  committed).
+- Worker creation cost and food upkeep — load-bearing per the note above; tune
+  against the whole baseline layer, not in isolation.
+- The per-segment materials cost of walls (tuning; the structural decision that
+  walls cost materials is settled, the magnitude is not).
 - Whether multiple workers on one tile shorten the duration (Civ-4-style) or not
   (Civ-5-style). Leaning "no stacking speedup" for legibility; defer.
 - Whether replacing an improvement (farm → mine on a plain tile) refunds partial
   progress. Default: no refund, consistent with the §2.12 reconfiguration default.
-- Whether later eras introduce construction-grade improvements that *do* cost
-  materials. Revisit then; not an Ancient-era concern.
+- Whether *other* later-era construction-grade improvements also cost materials
+  (walls have now opened this); revisit per era.
 
 ---
 
@@ -228,11 +294,18 @@ consistent with the runtime model where entities are reserved for units and
 cities. A worker is a unit (entity, `NetworkId`). A worker's build action is a
 **command** carrying `PlayerId`, applied by the authoritative core (`sim`), which
 sets the tile's improvement state; the manual path and the future automation
-directive both emit commands over this one path (Section 6). Determinism (pillar
-0.4) requires the build action and any tie-breaking (e.g. which improvement an
-automation directive selects) to be order-independent and reproducible. Detailed
+directive both emit commands over this one path (Section 6). **Placing a district
+footprint, building a road, and building a wall are likewise worker commands** that
+set tile/edge state (roads and walls are per-edge state over the same machinery);
+**constructing the buildings inside a district is not a worker command** — it is a
+build-slot output of the staffed-work economy (`cities.md` §2.7), so the worker
+layer emits *siting*, *road*, and *wall* commands, never *construction* ones.
+Determinism (pillar 0.4) requires the build action and any tie-breaking (e.g.
+which improvement an automation directive selects, or nearest-first surplus
+routing, `resources.md` §9) to be order-independent and reproducible. Detailed
 runtime shaping is deferred to implementation; this note fixes only that
-improvements are state set via the command layer, not unit-local mutation.
+improvements, roads, walls, and district footprints are state set via the command
+layer, not unit-local mutation.
 
 ---
 
@@ -250,3 +323,10 @@ improvements are state set via the command layer, not unit-local mutation.
 - `combat.md` §3.13 — the loadout instance of the same manual-primary pattern.
 - §0.6 / `cities.md` §2.11 — the canonical intent-level / anti-tedium pattern;
   this is its third instance.
+- `resources.md` §9 — supply network, storage, and the goods roads carry.
+- `ancient-content.md` — the Ancient improvement and infrastructure content list.
+- ADR-0030 — supply networks; records workers placing district footprints and
+  roads, and outpost construction via a connected city.
+- ADR-0032 — per-edge fortification; records walls as worker-built edge state on
+  the shared edge-defense model, and the materials-cost exception.
+- `combat.md` §3.10 — the shared per-edge defense model walls feed into.
