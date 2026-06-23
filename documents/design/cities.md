@@ -157,9 +157,9 @@ deliberate inversion (ADR-0028).** Build-slots and job-slots belong to the
 a city-level production stat. The one hardcoded exception is the **city center**,
 which holds exactly one serial **bootstrap build-slot** (warrior, worker, scout,
 settler, basic buildings, and placing districts, at baseline rate). An **outpost
-center has no build-slot and cannot build** (§2.12); outposts are developed by
-worker-placed districts whose buildings are constructed by a road-connected
-city's build capacity (§2.9, `resources.md` §9, ADR-0030). Beyond the single
+center has no build-slot and cannot build** (§2.12); outposts are developed
+entirely by workers, who place district footprints **and construct their
+buildings**, drawing network materials (§2.9, `resources.md` §9, ADR-0030). Beyond the single
 bootstrap slot, a settlement with no production buildings has no production
 capacity. The inversion is what makes the feeder-outpost empire shape (§2.9)
 load-bearing rather than optional.
@@ -328,15 +328,18 @@ bootstrap build-slot, §2.7), so the game can bootstrap from turn one. This is a
 starting condition, not a permanent capital bonus (§2.5). Every *subsequently*
 founded settlement begins as an outpost.
 
-**How settlements build (ADR-0030).** A **city center can build** (its bootstrap
-slot, plus build-slots in any production buildings it constructs). An **outpost
-center cannot build at all.** Outposts are developed instead by **workers placing
-district footprints** (`workers.md` §1) whose **buildings are constructed by the
-build capacity of a road-connected city**, drawing that city's network materials
-(`resources.md` §9). An outpost with no road to a city can still have its tiles
-improved by workers (worker-time only, `workers.md` §5) but cannot have districts
-or buildings constructed — which is exactly the support-from-a-city dependency
-that makes distant settling hard and roads worth building (§2.9).
+**How settlements build (ADR-0030).** A **city center can build** within its own
+footprint — its bootstrap slot, plus build-slots in any production buildings it
+constructs. An **outpost center cannot build at all.** Everything outside a city
+is built by **workers** (`workers.md` §1, §5): a worker places a district
+footprint *and* constructs the buildings on it, and likewise builds improvements,
+roads, and walls on non-city tiles. The worker is the player's single means of
+changing tiles beyond a city's footprint. Building construction still draws
+**network materials** (`resources.md` §9), so an outpost with no road to a city
+can still have its tiles improved (worker-time, little or no materials) but cannot
+have its buildings constructed — the support-from-a-city dependency that makes
+distant settling hard and roads worth building (§2.9) is preserved, now carried by
+the materials requirement rather than by which agent supplies the labor.
 
 **Promotion to city.** Once an outpost meets a population threshold and has the required materials, it can begin constructing a city hall in the center district. The city hall replaces the outpost specialization building. Completion of the city hall is the promotion event in mechanical terms; the player experiences it as "I built a city hall," not "I promoted my outpost." The same pattern continues for further administrative tiers (see §2.13 on district radius progression).
 

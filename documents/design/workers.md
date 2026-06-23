@@ -15,17 +15,19 @@ global chapter number when slotting it beside the existing design docs.
 
 ## 1. Scope: the baseline layer, and district siting
 
-**Decision (revised, ADR-0030):** Workers build **tile improvements** — farms,
-mines, forestry, and the like — on claimed tiles, **and place district footprints**
-on owned land (the act of siting a district's fixed multi-tile shape, `cities.md`
-§2.13). Workers do **not** construct the buildings inside those districts and do
-not run build-queues: building **construction** is a build-slot output of the
-staffed-work economy (`cities.md` §2.7), consuming network materials. For an
-**outpost** — whose center cannot build (`cities.md` §2.12) — the worker places the
-district footprint and a **road-connected city's build capacity constructs the
-buildings** over the network (`resources.md` §9). This supersedes the original
-"workers do not build districts" scope; placing a district was already a worker (or
-city-center) function in the resolved §2.7 model.
+**Decision (revised, ADR-0030):** Workers build **everything outside a city**. On
+claimed tiles they build **tile improvements** — farms, mines, forestry, and the
+like; on owned land they **place district footprints** (the act of siting a
+district's fixed multi-tile shape, `cities.md` §2.13) **and construct the buildings
+inside them**. A **city** builds only its own interior, through the build-slots of
+its staffed-work economy (`cities.md` §2.7); an **outpost** — whose center cannot
+build (`cities.md` §2.12) — is developed entirely by workers. Worker-built
+construction still **consumes network materials**, drawn demand-first at the build
+site (`resources.md` §9), so an outpost with no road to a city can have its tiles
+improved (worker-time, little or no materials) but cannot have its buildings
+constructed. This supersedes the original "workers do not build districts" scope:
+workers now site districts **and** construct their buildings; only a city's own
+interior is build-slot work.
 
 The improvement and district layers remain distinct, as separated in `cities.md`
 §2.13:
@@ -38,17 +40,24 @@ The improvement and district layers remain distinct, as separated in `cities.md`
 That efficiency asymmetry is a load-bearing invariant (`cities.md` §2.13): it is
 what keeps outposts and the core-plus-feeder empire shape (§2.9) meaningful. This
 document must not erode it — improvements stay the baseline, never a substitute
-for district development. What changed is only **who sites a district** (a worker
-can), not the asymmetry between improvements and districts, nor who *constructs*
-its buildings (build-slots, §2.7).
+for district development. What changed is who builds **outside** a city — workers
+now site districts and construct their buildings — not the asymmetry between
+improvements and districts, which is untouched.
 
-**Rationale:** Keeping the worker layer to baseline extraction plus district siting
-preserves the two-axis model's legibility (build infrastructure vs. work land)
-while giving outposts a buildable path that needs no per-outpost build-queue —
-construction is borrowed from a connected city. Letting workers *construct*
-buildings was rejected: it would add a parallel construction path against pillar
-0.5 and force an early materials-transfer system; routing construction through the
-network's existing build capacity avoids both (ADR-0030).
+**Rationale:** Making workers the single way to change anything outside a city
+keeps the two-axis model legible (build infrastructure vs. work land) and gives one
+interaction model for the whole exterior — no per-outpost build-queue, and no
+centralized remote-build-queue stuffing a city's own queue with its outposts' work.
+It is **not** a parallel construction path (pillar 0.5): build-slots and
+worker-time are two labor inputs to one progress machine (materials invested
+against a cost, completion flips build state), and worker-time already builds
+improvements and roads, so constructing outpost buildings reuses that channel. The
+strategic constraint is preserved by **materials**, not labor: buildings draw
+network materials, so an unconnected outpost still cannot build, only improve. The
+cost is that worker-time becomes the bottleneck for *all* exterior development,
+which makes worker create/upkeep cost the load-bearing tuning lever (Section 5) and
+requires worker tasking to be intent-level (§0.6) rather than per-building micro
+(ADR-0030).
 
 ---
 
@@ -100,10 +109,10 @@ tech tree (Section 8) actually reason about.
 **Roads — worker-built network infrastructure (ADR-0030).** In addition to the
 five yield improvements, the Ancient worker builds **roads**. A road is not a
 yield improvement: it is the **edge** of the supply network (`cities.md` §2.9,
-`resources.md` §9) over which materials and food are spent, and it is what lets a
-city's build capacity reach an outpost to construct its buildings (`cities.md`
-§2.12). Roads are the era's first logistics layer; without them an outpost cannot
-be built up and distant settling is hard — the intended pressure. Like
+`resources.md` §9) over which materials and food are spent, and it is what carries
+the **network materials** a worker draws on to construct an outpost's buildings
+(`cities.md` §2.12). Roads are the era's first logistics layer; without them an
+outpost cannot be built up and distant settling is hard — the intended pressure. Like
 improvements, a road costs **worker-time**; whether it also costs materials is
 tuning, deferred (Section 5).
 
@@ -295,11 +304,11 @@ cities. A worker is a unit (entity, `NetworkId`). A worker's build action is a
 **command** carrying `PlayerId`, applied by the authoritative core (`sim`), which
 sets the tile's improvement state; the manual path and the future automation
 directive both emit commands over this one path (Section 6). **Placing a district
-footprint, building a road, and building a wall are likewise worker commands** that
-set tile/edge state (roads and walls are per-edge state over the same machinery);
-**constructing the buildings inside a district is not a worker command** — it is a
-build-slot output of the staffed-work economy (`cities.md` §2.7), so the worker
-layer emits *siting*, *road*, and *wall* commands, never *construction* ones.
+footprint, constructing a building outside a city, building a road, and building a
+wall are likewise worker commands** that set tile/edge state. The one exception is
+a **city's own** building construction — a build-slot output of the staffed-work
+economy (`cities.md` §2.7), not a worker command. So the worker layer emits
+*siting*, *construction* (outside a city), *road*, and *wall* commands.
 Determinism (pillar 0.4) requires the build action and any tie-breaking (e.g.
 which improvement an automation directive selects, or nearest-first surplus
 routing, `resources.md` §9) to be order-independent and reproducible. Detailed
@@ -325,8 +334,8 @@ layer, not unit-local mutation.
   this is its third instance.
 - `resources.md` §9 — supply network, storage, and the goods roads carry.
 - `ancient-content.md` — the Ancient improvement and infrastructure content list.
-- ADR-0030 — supply networks; records workers placing district footprints and
-  roads, and outpost construction via a connected city.
+- ADR-0030 — supply networks; records workers placing district footprints,
+  constructing outpost buildings, and building roads.
 - ADR-0032 — per-edge fortification; records walls as worker-built edge state on
   the shared edge-defense model, and the materials-cost exception.
 - `combat.md` §3.10 — the shared per-edge defense model walls feed into.

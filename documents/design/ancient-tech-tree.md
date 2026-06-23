@@ -61,8 +61,9 @@ UI and determinism concern.
 start), settler; the **House**; and the placing of **Housing** districts.
 
 **Worker-buildable at turn zero:** the **farm** and **mine** improvements only — the
-ungated Bonus floor (`resources.md` §1, §8). Workers build improvements, not
-districts (`workers.md` §1). All other improvements are tech-gated (Section 3).
+ungated Bonus floor (`resources.md` §1, §8). All other improvements, and the
+placing and building-out of districts, are tech-gated (Section 3); workers gain
+those as the unlocking techs arrive (`workers.md` §1).
 
 **Unlocked content at turn zero:** the **Housing** district and the **House**
 building. Nothing else — every other district, building, unit, improvement, road,

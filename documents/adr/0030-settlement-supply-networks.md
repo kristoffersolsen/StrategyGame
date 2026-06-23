@@ -52,14 +52,28 @@ base.
 its silos hold and **re-runs demand-first** on its smaller network. In-progress
 construction on a stranded side **pauses** (it does not fail or refund).
 
-**Construction model:** a **city center can build** (bootstrap slot + production
-buildings, ADR-0028); an **outpost center cannot**. Workers **place** outpost
-district footprints, and a **road-connected city's build capacity constructs** the
-buildings, drawing the network's materials. An outpost with no road to a city can
-have tiles improved (worker-time only) but cannot have districts/buildings
-constructed — the support-from-a-city dependency that makes distant settling hard.
-This **supersedes** the `workers.md` §1 scope that said workers do not place
-districts.
+**Construction model.** A **city center can build** within its own footprint (its
+bootstrap slot, plus build-slots in any production buildings it constructs,
+ADR-0028); an **outpost center cannot build at all**. **Everything outside a city is
+built by workers** (`workers.md` §1, §3): a worker **places a district footprint and
+constructs the buildings on it**, and likewise builds improvements, roads, bridges,
+and walls on non-city tiles. The worker is the player's single means of changing
+tiles beyond a city's footprint.
+
+Building construction still **draws network materials**, demand-first at the build
+site, so an outpost unreachable by road can have its tiles improved (worker-time,
+little or no material cost) but **cannot have buildings constructed** — the
+support-from-a-city dependency that makes distant settling hard and roads worth
+building (`cities.md` §2.9) is preserved, now carried by the **materials
+requirement** rather than by the labor source.
+
+This is **not** a second construction primitive (pillar 0.5). Build-slots and
+worker-time are two **labor inputs to one progress machine**: a build job accumulates
+invested materials against a cost and flips to complete, regardless of which labor
+advanced it; and worker-time is **already** the labor for improvements and roads, so
+extending it to outpost buildings reuses that channel rather than duplicating the
+build-slot system. This **supersedes** the `workers.md` §1 scope that said workers do
+not place districts — workers now place footprints **and** construct their buildings.
 
 ## Consequences
 
@@ -75,8 +89,11 @@ districts.
   severance) and makes capacity a genuine decision.
 - Roads make supply lines physically matter from the first era (pillar 0.1) and give
   raiding/chokepoint play an early payoff.
-- Outpost construction via a connected city needs no per-outpost build queue and no
-  early materials-transfer system (pillar 0.5).
+- Workers are the single interaction model for everything outside a city, so there
+  is no per-outpost build queue **and** no centralized remote-build queue mixing a
+  city's own work with its outposts'. Construction draws network materials
+  demand-first at the build site, so no separate materials-transfer system is needed
+  (pillar 0.5).
 
 **Negative:**
 
@@ -86,6 +103,13 @@ districts.
   to hold in mind, though they map onto an intuitive physical distinction.
 - Demand-first plus nearest-first surplus routing must be proven order-independent
   for determinism (pillar 0.4).
+- Worker-time becomes the single bottleneck for **all** exterior development (outpost
+  buildings, improvements, roads), so worker create/upkeep cost and throughput become
+  the load-bearing tuning lever for the whole outside-the-city economy. The UI win
+  over a centralized build queue holds **only if** worker tasking is intent-level (a
+  "develop this outpost" directive the worker sequences itself, §0.6); per-building
+  worker micro would relocate the management burden onto the map rather than removing
+  it.
 
 ## Alternatives considered
 
@@ -100,16 +124,16 @@ districts.
 - **Proximity regions + remote construction** (no explicit roads; build anywhere in
   a proximity region): rejected as blurry — "am I in supply?" becomes a fuzzy
   distance check rather than a legible yes/no over explicit edges.
-- **Workers construct buildings directly:** rejected — a parallel construction path
-  (against ADR-0028) forcing an early materials-transfer system; routing
-  construction through the network's existing build capacity avoids both.
-
-## References
-
-- `resources.md` §9 (storage, distribution, upkeep), §6 (gold scope).
-- `cities.md` §2.7 (scope), §2.9 (roads/regions), §2.12 (construction model).
-- `workers.md` §1, §3 (district siting, roads; the superseded scope).
-- `combat.md` §3.11 (field-supply states), §3.13 (unit food upkeep).
-- ADR-0028 (build capacity; outpost centers cannot build).
-- Design pillars 0.1 (realism backdrop), 0.4 (determinism), 0.5 (no
-  over-engineering), 0.6 (deferred player-controlled distribution priority).
+- **Road-connected city constructs outpost buildings** (the originally-chosen model:
+  workers place footprints, and a connected city's build capacity constructs the
+  buildings over the network): rejected on reconsideration. It centralizes every
+  outpost's construction into the owning city's own build queue — a capital with
+  several outposts holds one long queue mixing its own buildings with all its
+  outposts', serialized through the capital's build-slot throughput — and it presents
+  a confusing two-agent seam (a worker places the footprint, then a distant city
+  reaches out to build on it). Routing all exterior construction through workers is
+  one legible rule. The original pillar-0.5 objection (worker-built buildings as a
+  parallel construction path) is answered by the unified one-progress-machine model
+  in the Decision; the original materials-transfer objection does not arise, because
+  construction is a demand-first draw on network storage at the build site, not a
+  background transfer.
