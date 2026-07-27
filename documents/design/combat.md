@@ -272,27 +272,34 @@ Compute strength ratio between attacker and defender after all modifiers (base s
 - Resolution order rules for simultaneous combats
 - Multi-unit combat prediction UI (one attacker, multiple potential defenders within range)
 
-#### Per-edge defense (walls and natural blockers, ADR-0032)
+#### Defense composition: walls and natural blockers (ADR-0032)
 
-**Decision:** Defensive modifiers attach to **tile edges**, not only to tiles. When
-a unit attacks **across an edge**, that edge's defensive value feeds the defender
-side of the strength ratio above. A single **shared edge-defense model** holds both
-natural and built blockers in the same units:
+**Decision:** When a unit attacks into a tile, the defender's positional modifier is
+**composed at resolution time** from two independent representations — not read from
+a single shared edge store:
 
-- **Natural:** a cliff edge (ADR-0012, `edge_class` delta ≥ 2), a river edge, a
-  coastline.
-- **Built:** a **wall** segment (worker-built per-edge state, `workers.md` §3).
+- **Natural:** the classification of the boundary the attacker crosses — a cliff
+  (ADR-0012, `edge_class` delta ≥ 2), a river, a coastline. This is the terrain
+  classification the map already produces; it is owned by neither tile.
+- **Built:** the **defender tile's own outward wall segment facing the attacker**,
+  if one exists. A wall is a one-sided owned `(tile, facing)` segment (ADR-0032,
+  `workers.md` §3) — built on the defender's own district tile and facing out, not a
+  neutral edge shared by both tiles. Combat reads exactly **one** wall segment per
+  assault: the target tile's segment toward the attacker.
 
-This is why settlement defense rewards terrain: a district edge already backed by a
-cliff or river carries edge-defense for free, so the player walls only the open
-sides. Multiple wall layers need no special rule — an attacker advancing through an
-outer and then an inner walled ring simply pays the edge-defense modifier at each,
-which is the "sieges are an investment" property emerging from one mechanism.
+Composing the two at resolution time is what makes settlement defense reward
+terrain: a district tile backed by a cliff or river already carries the natural term
+on that face, so the player spends wall segments only on the open sides. A
+**contested border is unambiguous** — each side owns its own segments on its own
+tiles, nothing is shared, so there is nothing to arbitrate or keep in sync (the
+double-ownership problem a shared-edge model would create). Multiple wall layers need
+no special rule — an attacker crossing an outer and then an inner walled district-tile
+face pays the modifier at each ring, the "sieges are an investment" property emerging
+from one mechanism.
 
-**Ancient walls are wooden.** They grant a defender bonus across the walled edge and
-nothing more: **no damage/destruction model** (a wall is static edge state until its
-tile is captured) and **no siege equipment** to counter them yet — both are later
-eras.
+**Ancient walls are wooden.** They grant a defender bonus across the walled face and
+nothing more: **no damage/destruction model** (a segment is static until its tile is
+captured) and **no siege equipment** to counter them yet — both are later eras.
 
 **Invariant (the no-siege-counter guardrail):** because the Ancient era ships walls
 without a siege counter, the wooden-wall bonus must be tuned so that a walled tile
@@ -301,17 +308,19 @@ If the bonus is set high enough to make a walled city unassailable, Ancient warf
 stalls until a later era. This is a balance dependency on the unit-strength model
 (§5.4 of `known-issues.md`), not a free parameter.
 
-**Rationale:** Unifying walls with natural blockers on one edge channel makes
-"use the terrain" structural rather than an emergent hope, reuses the edge-state
-machinery roads already established (pillar 0.5), and leaves a clean seam for siege
-to extend later (siege acts on wall edge-state). Edge-based modifiers also slot
-directly into the existing strength-ratio computation as one more defender term.
+**Rationale:** Composing natural and built defense at resolution time keeps "use the
+terrain" structural rather than an emergent hope, without forcing walls and terrain
+into one representation — the one-sided owned segment matches what a wall *is*
+(ADR-0032), and the natural classification the map already produces stays where it
+is. Both enter the existing strength-ratio computation as defender terms, and the
+seam for later siege is clean: siege acts on the wall segment, not on a shared edge.
 
 **Open questions:**
-- Whether river/coast edges contribute the same magnitude as a wooden wall, or less
-  (tuning).
-- Stacking rule when an edge has both a natural blocker and a wall (cap, or
-  diminishing); leaning "take the stronger, do not fully add" for legibility.
+- Whether river/coast boundaries contribute the same magnitude as a wooden wall, or
+  less (tuning).
+- Stacking rule when an assault crosses both a natural blocker and a wall segment
+  (cap, or diminishing); leaning "take the stronger, do not fully add" for
+  legibility.
 - Wall segment cost and bonus magnitude (tuning; the structural model is settled).
 
 

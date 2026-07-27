@@ -47,7 +47,8 @@ district type and not to a city-level production stat. The single hardcoded
 exception is the **city center**, which holds exactly one serial **bootstrap
 build-slot** (warrior, worker, scout, settler, basic buildings, placing districts,
 at baseline rate). An **outpost center has no build-slot and cannot build** (its
-construction is performed by a road-connected city, ADR-0030). A settlement with no
+districts and buildings are built by workers, not a connected city — the
+construction reversal, ADR-0030 revised). A settlement with no
 production buildings has, beyond that one bootstrap slot, no production capacity.
 
 **Co-location:** a building provides its slots at **base rate in any district**; its
@@ -128,5 +129,6 @@ progression (`resources.md` §2–§3; `combat.md` §3.13 for units).
   (settlements), §2.13 (districts).
 - `resources.md` §2–§3 (materials ladder, hybrid gate), §9 (supply networks).
 - `combat.md` §3.13 (chassis/component gate).
-- ADR-0030 (supply networks; outpost construction via a connected city).
+- ADR-0030 (supply networks; revised so workers — not a connected city —
+  construct an outpost's districts and buildings).
 - Design pillars 0.5 (correctness, no over-engineering), 0.6 (intent-level).

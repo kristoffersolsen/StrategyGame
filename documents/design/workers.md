@@ -106,28 +106,35 @@ This set covers every Ancient-era resource (`resources.md` §8). It is a content
 list, expected to grow; the five functional verbs are what the mechanics and the
 tech tree (Section 8) actually reason about.
 
-**Roads — worker-built network infrastructure (ADR-0030).** In addition to the
-five yield improvements, the Ancient worker builds **roads**. A road is not a
-yield improvement: it is the **edge** of the supply network (`cities.md` §2.9,
-`resources.md` §9) over which materials and food are spent, and it is what carries
-the **network materials** a worker draws on to construct an outpost's buildings
-(`cities.md` §2.12). Roads are the era's first logistics layer; without them an
-outpost cannot be built up and distant settling is hard — the intended pressure. Like
-improvements, a road costs **worker-time**; whether it also costs materials is
-tuning, deferred (Section 5).
+**Roads — worker-built network infrastructure (ADR-0030, ADR-0035).** In addition to
+the five yield improvements, the Ancient worker builds **roads**. A road is not a
+yield improvement: it is **tile infrastructure** (`infrastructure: Field<u8>`,
+ADR-0035) — **not** edge state — and the supply network's connectivity is computed
+over road tiles (`cities.md` §2.9, `resources.md` §9). Roads carry the **network
+materials** a worker draws on to construct an outpost's buildings (`cities.md`
+§2.12). They are the era's first logistics layer; without them an outpost cannot be
+built up and distant settling is hard — the intended pressure. A road is **worker
+construction**, so, like an outpost building, it **draws network materials** through
+the worker's materials buffer (ADR-0035, Section 5) on top of worker-time — which is
+what makes road-spam self-limiting through the economy rather than free work for idle
+labor. The per-segment magnitude is tuning, deferred.
 
-**Walls — worker-built defensive edges (ADR-0032).** The worker also builds
-**walls**, the Ancient era's settlement defense. A wall, like a road, is **per-edge
-state**, not a tile improvement, and reuses the same edge-state machinery; it is
-placed on the **edges of district tiles** (the built-up perimeter). A walled edge
-contributes to a **shared per-edge defense model** alongside natural blockers
-(cliffs, rivers, coast), so backing a settlement onto a cliff and walling only the
-open sides falls out structurally — the cliff already defends its edge. Unlike
+**Walls — worker-built defensive segments (ADR-0032).** Among the constructs the
+worker builds is the **wall**, the Ancient era's settlement defense — on an
+**outpost**'s tiles (a city's own walls are build-slot work, by the two-axis rule of
+§1). A wall is a one-sided owned **`(tile, facing)` segment** — built on one of the
+settlement's own district tiles and facing outward — **not** a tile improvement and
+**not** an edge primitive: the far side belongs to no one until an enemy walls it,
+and if they do, that is a second, separately owned segment. Segments sit on the
+**outward faces of district tiles** (the built-up perimeter). In combat the segment's
+bonus is **composed with any natural blocker on the crossed boundary at resolution
+time** (`combat.md` §3.10), so backing a settlement onto a cliff and walling only the
+open sides still falls out — the cliff already defends those faces. Unlike
 improvements, a wall costs **worker-time *and* a modest base-materials (lumber)
-charge per segment** (the deliberate exception in Section 5). Ancient walls are
-**wooden**: a defender bonus when attacked across the walled edge, surmountable by
-assault, with no damage model yet — siege is a later era (`combat.md` §3.10,
-ADR-0032).
+charge per segment** (the deliberate exception in Section 5), drawn through the
+worker's materials buffer (ADR-0035). Ancient walls are **wooden**: a defender bonus
+across the walled face, surmountable by assault, with no damage model yet — siege is
+a later era (`combat.md` §3.10, ADR-0032).
 
 **Open questions:**
 - Whether pasture splits into a food variant and a horse variant or stays one
@@ -305,16 +312,21 @@ cities. A worker is a unit (entity, `NetworkId`). A worker's build action is a
 sets the tile's improvement state; the manual path and the future automation
 directive both emit commands over this one path (Section 6). **Placing a district
 footprint, constructing a building outside a city, building a road, and building a
-wall are likewise worker commands** that set tile/edge state. The one exception is
-a **city's own** building construction — a build-slot output of the staffed-work
-economy (`cities.md` §2.7), not a worker command. So the worker layer emits
-*siting*, *construction* (outside a city), *road*, and *wall* commands.
+wall segment are likewise worker commands** — each setting authoritative state of its
+own shape: an improvement and a road are **tile** state (`infrastructure`, ADR-0035),
+a wall is a one-sided owned **`(tile, facing)`** segment (ADR-0032), and a district
+footprint is the placed shape over claimed tiles. None of these is an edge primitive;
+the engine grows no general edge state (ADR-0035). The one exception is a **city's
+own** construction — districts, buildings, and walls on a city's tiles are build-slot
+output of the staffed-work economy (`cities.md` §2.7, the two-axis rule of §1), not
+worker commands. So the worker layer emits *siting*, *construction* (outside a city),
+*road*, and *wall* commands.
 Determinism (pillar 0.4) requires the build action and any tie-breaking (e.g.
 which improvement an automation directive selects, or nearest-first surplus
 routing, `resources.md` §9) to be order-independent and reproducible. Detailed
 runtime shaping is deferred to implementation; this note fixes only that
-improvements, roads, walls, and district footprints are state set via the command
-layer, not unit-local mutation.
+improvements, roads, wall segments, and district footprints are state set via the
+command layer, not unit-local mutation.
 
 ---
 
@@ -336,6 +348,11 @@ layer, not unit-local mutation.
 - `ancient-content.md` — the Ancient improvement and infrastructure content list.
 - ADR-0030 — supply networks; records workers placing district footprints,
   constructing outpost buildings, and building roads.
-- ADR-0032 — per-edge fortification; records walls as worker-built edge state on
-  the shared edge-defense model, and the materials-cost exception.
-- `combat.md` §3.10 — the shared per-edge defense model walls feed into.
+- ADR-0035 — transit and field supply; roads are tile infrastructure (not edge
+  state), and worker construction (roads, outpost buildings, walls) draws network
+  materials through the worker's materials buffer.
+- ADR-0032 — one-sided owned `(tile, facing)` wall segments; records walls as a
+  no-slot build target (worker work on an outpost, build-slot work in a city) and the
+  materials-cost exception.
+- `combat.md` §3.10 — the composed, per-assault defense model wall segments feed
+  into.

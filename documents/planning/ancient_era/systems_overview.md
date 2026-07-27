@@ -1,6 +1,6 @@
 # Systems Overview — Ancient Era Core
 
-**Last updated:** 2026-06-22 (handoff: stale-docs flag + ADR gaps)
+**Last updated:** 2026-06-23 (S1 closed — supply pipeline systems sketched; combat next)
 
 A living index of the Ancient-era core-systems design work: what is settled
 enough to build, and what stubs we have deliberately deferred and must return
@@ -15,25 +15,92 @@ where it was captured.
 reorg/impl pending · 🌿 Open (deferred, must return) · ⛔ Blocked (waits on
 another item).
 
-> ⚠️ **Known-stale docs — do not trust as written.** The ADR layer is now synced
-> (ADR-0032 reversed to one-sided `(tile, facing)` walls; ADR-0033/0034/0035 added).
-> What remains stale are **design docs and one ADR cross-ref** still describing
-> reversed models (tracked as **S5** plus below). A cold read of these gives the
-> *wrong* model; sync before building walls/roads.
-> - **combat.md §3.10** — still describes shared per-edge wall defense; should be the
->   composed per-assault model (ADR-0032 revised).
-> - **workers.md §3, §5, §9** — still frame roads/walls as edge state; roads are tile
->   infrastructure and walls are `(tile, facing)` (ADR-0035, ADR-0032 revised).
-> - **ADR-0028** — its parenthetical "outpost construction is performed by a
->   road-connected city" is the pre-reversal model, superseded by ADR-0030 (revised);
->   fix in 0028's review pass.
+> **Doc sync — 2026-06-23.** The wall/road reversal is now fully propagated. ADRs
+> 0033/0034/0035 are written and ADR-0032 is reversed (see *ADR coverage* below);
+> **combat.md §3.10** (composed per-assault defense) and **workers.md §3/§9** (tile
+> roads, `(tile, facing)` walls) are synced; **ADR-0028**'s stale
+> outpost-construction parenthetical is fixed in place (still `Proposed`).
+> **workers.md §5 was not stale** — its wall-cost text was already correct, so the
+> earlier "§3, §5, §9" flag is corrected to §3/§9.
+>
+> **Remaining repo action:** delete the superseded duplicate
+> `documents/adr/0032-per-edge-fortification.md`; the live wall ADR is
+> `documents/adr/0032-directional-wall-segments.md`. Separately, the ADR index
+> `documents/adr/README.md` required by documentation-guide §4.6 does not yet exist
+> and should be created.
 
 ---
 
 ## Settled
 
+### Ownership & trade networks
+*Sketched in `empire.rs`, `transit.rs`, `settlement_economy.rs`. Rationale in chat;
+**ADR pending** (Empire owner model + trade-network partition) — write in Claude Code.*
+
+- ✅ **Empire is the only owner.** `Owner(EmpireId)` (dense `u8`, fixed roster) tags
+  settlements, units, and infrastructure — replaces `SettlementOwner(PlayerId)`. No
+  `Player` in authoritative state: a *civilization* (ADR-0022 identity) and a
+  *controller* (human/AI, `ControllerMode`) are attributes of an empire, not owners.
+  Control switching is a command; the client↔empire mapping is session-layer and does
+  not replay.
+- ✅ Empire entity owns `EmpireId`, `Treasury` (empire-wide gold/science/culture — the
+  home those goods previously lacked), `RoadPool` (its own component; was "player
+  entity"), and `ControllerMode`. A new **leaf module `empire`** holds the shared keys
+  so `economy` and `transit` use them without depending on each other.
+- ✅ **Trade network = a cached component partition** — not a graph, topology, or
+  weighted structure. Each settlement carries a `TradeNetworkId` (a within-turn label,
+  **not** an entity id — named to dodge the `NetworkId`/ADR-0024 collision). Pooling
+  groups members by equal label and sums their `Storage` at spend time.
+- ✅ **Recompute, not incremental.** `transit::recompute_trade_networks` flood-fills the
+  affected empire's road tiles on a connectivity command (route finished, road
+  destroyed, settlement founded/destroyed/captured) — never per turn. Merge and
+  severance are the *same* relabel; no union-find, no stale-partition desync class
+  (pillar 0.5). Visits *all* the empire's settlements (isolated = singleton).
+- ✅ **No "find nearest network" search.** Settlement draw reads its own `TradeNetworkId`
+  (O(1)); field draw reads the source `supply_source_in_range` returns, then that
+  source's tag. The only distance traversal is field-supply (deferred, W7), never the
+  partition.
+- ✅ **Surplus distribution** (ADR-0030): whole-component, demand-first, then fill member
+  storages by a per-settlement 0–10 `Storage::intake_priority` (descending); drain
+  ascending. No distance or geography — a sort, not a traversal.
+
+### Turn loop & resolution
+*Sketched in `turn.rs` (loop) and `setup.rs` (`state_0`). Rationale in chat;
+**ADR pending** (turn model + resolution order) — write in Claude Code.*
+
+- ✅ **One state, two phases.** `Interactive` (controllers emit commands that
+  complete *live*, world frozen) → lock → `Resolving` (AI emits via the same path,
+  then the world advances one tick). No second "next-turn" state object.
+- ✅ **Canonical command log = sole order of record** (pillar 0.4). Server assigns a
+  `CommandSeq` on arrival; clients/replays re-apply the log, never re-derive order.
+  Arrival order *is* interactive contention adjudication (a taken tile is invalid,
+  not a conflict) — so the interactive phase needs no conflict rules. Per-empire FIFO
+  falls out for free.
+- ✅ **Three modes (simultaneous / sequential / mixed) are input-gating policies on
+  one loop**, not three engines — who may submit when. Same apply path, log, advance.
+  Mixed clusters on *contention this turn*, not the war flag (deferred with combat).
+- ✅ **Simultaneity seam lives in combat only** (`turn::resolve_combat`), resolved in
+  the advance against the locked snapshot — not in the interactive phase.
+- ✅ **World-advance order:** produce (network-local → `Storage`, empire-wide →
+  `Treasury`) → consume demand-first per pooled component (upkeep, construction via
+  `advance_construction`/`advance_worker_jobs`, growth) → distribute surplus by
+  `intake_priority` → **combat (last)** → tick. Combat-last ⇒ no mid-advance partition
+  relabel (its connectivity changes fire an event-recompute for next turn).
+- ✅ **Pool/distribute is an `economy` system**, not `transit`: the partition is
+  materialized as per-settlement `TradeNetworkId` tags, so the reduce groups by tag
+  and needs no `transit` import. (Resolves S1's "where does distribution live".)
+- ✅ **Singleplayer = degenerate single-source case** of this loop; integrated-server
+  (Stages 4–6) reshapes nothing.
+- ✅ **Supply pipeline (S1) closed.** The economy phase systems are sketched
+  (`produce_yields` → `resolve_supply` → growth/`distribute_surplus`). Demand-order
+  decisions pinned: **food upkeep before growth**; **materials by queue priority then
+  ascending settlement key** when short; the per-component pool is within-advance
+  scratch, never stored. Starvation *selection* and the step-2-completion-in-combat
+  question are deferred by reference (ADR-0031 / §2.6, and S7).
+
 ### Settlement economy & production
-*Captured in `settlement_economy.rs` sketch; ADR-0028 (staffed-work model).*
+*Captured in `settlement_economy.rs` sketch; ADR-0028 (staffed-work model), ADR-0033
+(economy runtime + priority allocation).*
 
 - ✅ Settlement is the entity; city and outpost are the same entity at different
   center tiers (tier derived from the center content handle, no `is_city` flag).
@@ -85,7 +152,8 @@ ancient-tech-tree.md.*
   rule as severance).
 
 ### Job system
-*Captured in `jobs.rs` (settlement) and `transit.rs` (roads).*
+*Captured in `jobs.rs`, `transit.rs`; ADR-0034 (settlement job system), ADR-0035
+(transit + field supply).*
 
 - ✅ Settlement jobs use one `Job` type (Site-shaped: `target` + `cost` +
   `invested`; no kind enum after roads split out), in a shared `JobQueue`.
@@ -102,8 +170,8 @@ ancient-tech-tree.md.*
   queues with `invested` intact (both hold the identical `Job`).
 
 ### Spatial representation
-*Roads/rivers captured across ADR-0030, workers.md; walls decided in discussion
-but docs not yet synced (see stubs).*
+*Roads/rivers captured in ADR-0035 (tile roads); walls in ADR-0032 revised
+(`(tile, facing)`). combat.md §3.10 and workers.md §3/§9 synced 2026-06-23.*
 
 - ✅ Roads are **tile** infrastructure (`infrastructure: Field<u8>`), not edge
   state. Rivers are a tile property. Bridges are tile infrastructure (Classical+).
@@ -112,7 +180,7 @@ but docs not yet synced (see stubs).*
   (no stored path; auto-reroutes; resume re-derives the same continuation).
 - ✅ Walls are one-sided **owned `(tile, facing)`** segments, not an edge
   primitive — built as queue jobs holding no job-slots and no district capacity.
-  *(Decision settled; doc sync is an open stub.)*
+  *(Decision settled, ADR-0032 revised; combat.md §3.10 + workers.md §3/§9 synced.)*
 
 ### Module organization (executed)
 *Reorg done; dead duplicates deleted. Realized sketch files:*
@@ -133,19 +201,20 @@ but docs not yet synced (see stubs).*
 
 ---
 
-## Decisions needing ADRs (rationale currently only in chat)
+## ADR coverage — decisions now captured
 
-These are *decided and sketched*, but the **why** lives only in the originating
-conversation — the highest rationale-loss risk at handoff. The sketches capture
-the *what*; an ADR is needed for the *why* before the reasoning is unrecoverable.
+These decisions were once recorded only in chat (the highest rationale-loss risk at
+handoff). Each now has an ADR carrying its *why*; this table is the index from
+decision to record. All Ancient-era ADRs are `Proposed` (none yet moved to
+`Accepted`).
 
-| Decision | Rationale lives | ADR action |
-|----------|-----------------|------------|
-| Priority-ratio goal · greedy-with-bundles allocator · building-level completion bonus · off-the-top population split · `enabled` throttle | chat; partial in ADR-0028 | If ADR-0028 is still Proposed, revise it in place to add these; else a new ADR extending it. |
-| Job system: site-owned jobs, one-per-job, two drivers, `ConstructionQueue`/`WorkerQueue`, promotion migration | chat; `jobs.rs` | **New ADR** (settlement job system). |
-| Transit/field-supply: roads extend supply at finite tech-scaled range; field-supply (range-limited) vs ADR-0030 settlement-goods (connectivity-wide) as two layers; worker materials-supply category; transit competes for the materials pool | chat; `transit.rs`, `worker.rs` | **New ADR** (transit + field supply). |
-| Walls = one-sided owned `(tile, facing)`, not edge state | chat | **Reverse ADR-0032** (this *is* the substance of S5). |
-| Entity-vs-owned-data (`struct` ≠ `Entity`; districts/buildings are data) | chat; rule stated in ADR-0023 | Verify ADR-0023 captures the *why*; extend if thin. |
+| Decision | Captured in |
+|----------|-------------|
+| Priority-ratio goal · greedy-with-bundles allocator · building-level completion bonus · off-the-top population split · `enabled` throttle | **ADR-0033** (settlement economy runtime + allocation) |
+| Job system: site-owned jobs, one-per-job, two drivers, `ConstructionQueue`/`WorkerQueue`, promotion migration | **ADR-0034** (settlement job system) |
+| Transit / field-supply: tile roads, derived paths, range-limited field supply vs. connectivity-wide settlement goods, worker materials buffer, shared materials pool | **ADR-0035** (transit and field supply) |
+| Walls = one-sided owned `(tile, facing)`, not edge state | **ADR-0032** revised (`0032-directional-wall-segments.md`) |
+| Entity-vs-owned-data (`struct` ≠ `Entity`; districts/buildings are data) | **ADR-0033** (Decision; extends the ADR-0023 tile-layer entity rule) |
 
 ---
 
@@ -153,12 +222,16 @@ the *what*; an ADR is needed for the *why* before the reasoning is unrecoverable
 
 | ID | Stub | Status | Resume notes |
 |----|------|--------|--------------|
-| S1 | **Supply network** — connected-component decomposition over road tiles; demand-first distribution; severance recalculation. | 🌿 | The next major slice. Owns connectivity (`transit`) → economy. |
+| S1 | **Per-turn supply pipeline** — economy phase-system bodies in the resolution order. | ✅ | **Closed.** `economy::{produce_yields, resolve_supply, apply_growth}` + pure `distribute_surplus` sketched (bodies `todo!()`). Per component: pool (within-advance scratch) → upkeep → construction → growth → surplus by `intake_priority`. **Food: upkeep before growth** (army drags growth — intended). **Materials when short: queue priority, then ascending settlement key** (cross-settlement fairness = revisitable tuning). Deferred *by reference*: starvation selection (ADR-0031 / `cities.md` §2.6); "may a step-2 completion fight in step-4" → S7. Co-designed with S2. |
 | S2 | **Network-scoped saturation signal** feeding `allocate()` | ⛔ S1 | The stockpile-feedback idea: per-network marginal-value per good, **two-tier** (cover throughput demand, then buffer to cap), smooth curve (avoid oscillation), computed from **start-of-turn** state (acyclic). Co-designed with S1. |
 | S3 | **Worker unit module** — assignment, claim-at-assignment (pre-travel), orphan-revert, one-per-job. | 🔧 | Types + driver-system *signatures* sketched in `worker.rs`; system **bodies** are `todo!()`. Travel reuses general unit movement. |
 | S4 | **Intent-level worker tasking** ("develop this outpost toward plan X" → sequences jobs). | 🌿 | **Hard requirement**, not optional: the construction reversal is only a UI win if worker tasking is intent-level, not per-building micro (§0.6). |
-| S5 | **Walls / edge-state doc sync** | 🌿 | Walls = `(tile, facing)`, roads = tile. Stale: ADR-0032 (titled "per-edge fortification"), combat.md §3.10 (shared per-edge defense), workers.md §3 (roads/walls as edge). Its own ADR-reversal + sync pass. |
 | S6 | **AI strategist (layer 3)** — goal-setting + build/expansion search over a horizon. | 🌿 | Command source; uses `allocate()` as inner loop; non-deterministic search permitted (emits commands through the validation gate). Replay/test reproducibility is a deliberate choice to make. |
+| S7 | **Combat model** — the simultaneity policy at `turn::resolve_combat` (advance step 4). | 🌿 | **Gates** the advance's combat step and the mixed-mode initiative path; prerequisite for any combat threading. Rule-adjudicated (simultaneous) vs initiative-within-conflict-cluster (sequential/mixed). Reads the locked snapshot ("parallelize the map, serialize the reduce"). |
+| S8 | **Game setup → `state_0`** — consume `WorldData`, spawn empires/settlements/units, seed partition. | 🔧 | Shape sketched in `setup.rs` (system signatures, `GameSetup`/`EmpireSetup`). **Content gated:** settlement placement on Stage 3.6 (starting positions, unbuilt); opening unit loadout on tech-tree + create/upkeep cost tuning. |
+
+*(S5 — walls/edge-state doc sync — resolved 2026-06-23; ADR-0032 reversed + design
+docs synced. See Settled → Spatial representation. ID retired.)*
 
 ### Worker supply & transit cost (sub-thread of S3)
 
@@ -170,6 +243,7 @@ the *what*; an ADR is needed for the *why* before the reasoning is unrecoverable
 | W4 | Worker create/upkeep cost = tuning lever; **buffer size** = how deep past the network a worker can push. | 🌿 | Tuning, deferred. |
 | W5 | Materials is the *only* build-relevant buffer; food = ambient unit upkeep. | ✅ | Confirmed materials-only. Food stays the universal §3.11 rule (attrition if stranded), not a per-worker concern. |
 | W6 | Foraging: **deferred, not deleted.** | ✅ | Ancient surfaces a single slow out-of-supply rate, no "foraging" jargon (everything forages → no contrast). §3.11 unchanged; the faster can't-forage rate appears with industrial units. |
+| W7 | **Field-supply coverage cache shape:** per-source reachable set with range-scoped invalidation — **not** a per-tile field. | 🌿 | Shape pinned, build deferred to unit-actions. A source's set is re-walked only when a road/source/relay *within its range* changes, so a quiet turn re-walks nothing; group orders compute coverage once per empire, then O(1) per consumer. Avoids the per-tile push-model that tempts full-map repaint. |
 
 *Transit-cost consequence:* worker construction now competes with build-slot
 construction for the **same materials pool**, so road/outpost-spam is

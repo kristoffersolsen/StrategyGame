@@ -38,7 +38,7 @@ use bevy::prelude::Component;
 use content::Handle as ContentHandle;
 use coords::Coord;
 
-use crate::sim::{commands::PlayerId, network_id::NetworkId};
+use crate::sim::network_id::NetworkId;
 
 // ------------- Value types -------------
 
@@ -155,13 +155,23 @@ pub(crate) enum BuildState {
 /// Per-settlement stock and capacity for network-local goods (ADR-0030).
 ///
 /// Each settlement physically holds its own pile, which is what makes supply
-/// severance a recalculation rather than a tug-of-war.
+/// severance a recalculation rather than a tug-of-war. Only the network-local
+/// axes (food, materials) live here; the empire-wide axes (gold, science,
+/// culture) live in [`crate::sim::empire::Treasury`] on the empire entity.
 pub(crate) struct Storage {
     /// Current stock. Only network-local axes (food, materials) are meaningful.
     pub(crate) stock: Yields,
     /// Capacity = center base + silos. Overflow past all reachable capacity is
     /// lost (ADR-0030).
     pub(crate) capacity: Yields,
+    /// Surplus-intake priority, `0..=10` (ADR-0030 surplus distribution). Once
+    /// the whole trade network's demand (upkeep, growth, build draw) is met,
+    /// the remainder fills member storages in *descending* priority; drain runs
+    /// in *ascending* priority. `0` never accepts surplus and is drained first;
+    /// `10` accepts maximally and is drained last. This governs **surplus only** —
+    /// demand is always met before any intake, so it is never a consumption-order
+    /// knob. The component-wide comparison is a sort, not a graph traversal.
+    pub(crate) intake_priority: u8,
 }
 
 /// Number of priority points a player distributes across the yield axes.
@@ -269,9 +279,12 @@ pub(crate) struct Settlement;
 #[derive(Component)]
 pub(crate) struct SettlementNetworkId(pub(crate) NetworkId);
 
-/// The player that owns this settlement.
-#[derive(Component)]
-pub(crate) struct SettlementOwner(pub(crate) PlayerId);
+/// Ownership and trade-network membership are **not** redefined here. A
+/// settlement entity also carries [`crate::sim::empire::Owner`] (the one owner
+/// key, `EmpireId`, shared with units and infrastructure — replacing the former
+/// `SettlementOwner(PlayerId)`) and a [`crate::sim::empire::TradeNetworkId`]
+/// stamped by the transit recompute. Both live in the leaf `empire` module so
+/// that `economy` and `transit` share them without depending on each other.
 
 /// The settlement's center tile.
 #[derive(Component)]
@@ -371,4 +384,82 @@ pub(crate) fn settlement_yields(
 ) -> Yields {
     let _ = (slots, assignment, multipliers);
     todo!("staffed sum + completion bonuses + global multipliers")
+}
+
+// ------------- World-advance systems (resolution phase) -------------
+//
+// These run in the Resolving phase (`crate::sim::turn`), reading the locked
+// start-of-turn snapshot, in this order: `produce_yields` → `resolve_supply`
+// (which itself runs upkeep → construction → growth → surplus per component) →
+// combat. They are economy systems, not transit ones: the trade-network partition
+// is materialized as per-settlement `crate::sim::empire::TradeNetworkId` tags, so
+// the reduce groups settlements by tag and needs no `transit` dependency.
+
+/// Produces this turn's yields into authoritative stock — step 1 of the advance.
+///
+/// Per settlement, sums [`settlement_yields`] for its cached assignment and routes
+/// by scope (ADR-0030): the network-local axes (food, materials) add to its own
+/// [`Storage::stock`]; the empire-wide axes (gold, science, culture) add to the
+/// owning empire's [`crate::sim::empire::Treasury`]. The only writes are those
+/// increments. Deterministic over settlements in ascending settlement key.
+pub(crate) fn produce_yields() {
+    todo!("settlement_yields per settlement; network-local -> Storage, empire-wide -> Treasury")
+}
+
+/// Resolves one turn of each trade network's economy — steps 2–3 of the advance:
+/// pool, consume demand-first, then distribute the surplus.
+///
+/// Groups settlements by their [`crate::sim::empire::TradeNetworkId`] (the
+/// materialized partition) and, per component, treats member stock as one **pooled
+/// budget** — within-advance scratch, never stored, consistent with the network
+/// being derived. Demand is met from the pool in a fixed order:
+///
+/// 1. **Upkeep** — unit food upkeep (ADR-0031) drawn from the pool; a shortfall is
+///    starvation (ADR-0031 / `cities.md` §2.6), not a stall. *Which* units/pop are
+///    cut on an unmet shortfall lives in those docs, not here.
+/// 2. **Construction** — `jobs::advance_construction` (city build-slots) and
+///    `worker::advance_worker_jobs` (workers) draw materials from the pool. When
+///    materials are short the queue's existing priority order decides funding
+///    (top-first; lower jobs stall with progress intact, since jobs are
+///    site-owned); across settlements sharing the component, ascending settlement
+///    key. That cross-settlement order is a deterministic default, not a balance
+///    statement — revisitable tuning, not structure.
+/// 3. **Growth** — [`apply_growth`] draws food from the remaining pool.
+///
+/// **Food is upkeep before growth**: a shortfall halts expansion before it starves
+/// what exists, so a standing army drags on growth — intended pressure. Food and
+/// materials never compete (separate axes), so these are the only orderings that
+/// matter.
+///
+/// Then [`distribute_surplus`] returns the pooled remainder to member storages.
+/// Deterministic over components in ascending `TradeNetworkId`.
+pub(crate) fn resolve_supply() {
+    todo!("pool component (scratch); upkeep -> construction -> growth; then distribute_surplus")
+}
+
+/// Advances one turn of population growth from available food — the growth step of
+/// [`resolve_supply`], factored out pure for testability.
+///
+/// Consumes food from the component pool to advance the settlement's growth per
+/// `cities.md` §2.6 (the growth-loop math lives there, not duplicated here), and
+/// returns the food actually consumed so the caller deducts it from the pool. A
+/// food deficit is the §2.6 shrink path. Pure and deterministic.
+pub(crate) fn apply_growth(economy: &mut SettlementEconomy, food_available: i32) -> i32 {
+    let _ = (economy, food_available);
+    todo!("advance growth per cities.md §2.6; return food consumed")
+}
+
+/// Distributes a component's post-demand surplus across its members by intake
+/// priority — the final step of [`resolve_supply`], factored out pure for
+/// testability.
+///
+/// Fills storages in **descending `intake_priority`** (a `0` never receives and was
+/// drained first; ties broken by ascending settlement key, so `members` are passed
+/// in that order), each clamped to `Storage::capacity`; whatever cannot be stored
+/// anywhere is lost (ADR-0030). A sort over members, not a graph traversal.
+/// `members` is one trade network's storages; `surplus` is the pooled remainder
+/// after demand.
+pub(crate) fn distribute_surplus(members: &mut [Storage], surplus: Yields) {
+    let _ = (members, surplus);
+    todo!("descending intake_priority, clamp to capacity, overflow lost")
 }
